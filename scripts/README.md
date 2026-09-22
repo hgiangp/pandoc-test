@@ -15,7 +15,7 @@ input.docx
  ├─[2] cleanup     cleanup\ (Python)            làm sạch dữ liệu theo profile, bật/tắt được → input.clean.docx
  │                   ReviewerBoxes → UnwrapLayoutTables   (profile ns)
  ├─[3] convert     Convert-ShapesToPictures.ps1 chuyển hình vẽ sang PNG bằng Word  → input.shapes.docx
- ├─[4] pandoc      --wrap=none --lua-filter=pandoc\figures.lua                    → input.md + images\
+ ├─[4] pandoc      -t gfm --wrap=none --lua-filter=pandoc\figures.lua             → input.md + images\
  └─[5] gate        Test-DocxDrawings.ps1        kiểm tra không còn hình nào bị mất
 ```
 
@@ -224,7 +224,34 @@ uv add <package>                         # thêm dependency (tự cập nhật u
 uv lock --upgrade                        # nâng phiên bản các thư viện
 ```
 
-## Bước pandoc: `pandoc\figures.lua`
+## Bước pandoc: định dạng đầu ra và `pandoc\figures.lua`
+
+### Định dạng đầu ra: GFM
+
+Pipeline xuất **GFM** (GitHub Flavored Markdown, `-t gfm`), không xuất Pandoc Markdown
+(`-t markdown`). Lý do là cần cân bằng giữa người đọc và AI:
+
+| Tiêu chí | Pandoc Markdown | **GFM (mặc định)** |
+|---|---|---|
+| Người đọc (GitHub, VS Code, GitLab) | ❌ Grid table `+---+`, `{…}` và `: caption` hiện thành chữ thô | ✅ Hiển thị đúng |
+| AI, bảng đơn giản | Grid table: nhiều dấu cách căn cột, tốn token | Bảng pipe: gọn nhất |
+| AI, bảng phức tạp (ô nhiều đoạn, có caption, không có hàng tiêu đề) | Grid table: nội dung một ô bị tách qua nhiều dòng | Bảng HTML `<table>` + `<caption>`: ranh giới ô rõ ràng |
+| AI, hình | Ảnh + thuộc tính `{alt=…}` | `<figure>` gồm ảnh (có alt text) và `<figcaption>` |
+
+Các giới hạn của bảng pipe trong GFM: mỗi ô chỉ một dòng, bắt buộc có hàng tiêu đề, không có
+caption. Bảng nào vi phạm, pandoc sẽ xuất thành bảng HTML. Muốn bảng đơn giản ra bảng pipe
+thì trong Word, hàng đầu tiên phải được đánh dấu "Repeat as header row".
+
+**Yêu cầu với hệ thống phía sau (RAG/LLM):** phải giữ thẻ HTML trong markdown, và không được
+cắt chunk giữa một `<table>` hay `<figure>`.
+
+Muốn xuất Pandoc Markdown để so sánh: `run-all.bat input.docx -OutputFormat markdown`.
+
+Gỡ bảng bọc (cleanup) vẫn **cần thiết** với GFM. Nếu không gỡ, hình và bảng dữ liệu trở
+thành bảng HTML lồng trong một bảng HTML khác: người đọc vẫn thấy khung bao quanh, còn AI
+không biết caption thuộc về hình hay bảng nào.
+
+### `figures.lua`
 
 Lua filter chạy trong pandoc, xử lý các ảnh do bước convert tạo ra:
 
@@ -232,20 +259,24 @@ Lua filter chạy trong pandoc, xử lý các ảnh do bước convert tạo ra:
 |---|---|---|
 | Title `shape2png:S001` (dùng để đối chiếu với manifest) chuyển thành thuộc tính | `"shape2png:S001"` | `data-shape="S001"` |
 | Alt text chứa chữ trong hình: giữ lại cho LLM, bỏ dấu `\|` vốn gây xung đột với cú pháp bảng | `Drawing converted to image. Text: A \| B` | `Text in figure: A; B` |
-| Bookmark trong caption của figure chuyển lên figure, bỏ ngoặc vuông lồng nhau trong cú pháp ảnh | `![[]{#_Ref1 .anchor}Fig. 7‑30 …](…)` | `![Fig. 7‑30 …](…){#_Ref1 …}` |
+| Bookmark trong caption của figure chuyển lên figure | `<span id="_Ref1" class="anchor">` nằm trong caption | `<figure id="_Ref1">` |
 
-Kết hợp với `--wrap=none` (không ngắt dòng giữa cú pháp ảnh hay link) và việc gỡ bảng bọc,
-mỗi hình giờ là một dòng:
+Khi ảnh đứng ngay trước một đoạn caption, pandoc tự ghép hai phần thành một figure.
+Kết quả với GFM:
 
-```markdown
-![Fig. 7‑30 Transition of alarm sound status](images/media/image19.png){#_Ref240186339 alt="Text in figure: Sound span; Not sound span; S1; S4; S3; S2" width="2.5in" height="2.38in" data-shape="S001"}
+```html
+<figure id="_Ref240186339">
+<img src="images/media/image19.png" style="width:2.5in;height:2.38in" data-shape="S001" alt="Text in figure: Sound span; Not sound span; S1; S4; S3; S2" />
+<figcaption><p>Fig. 7‑30 Transition of alarm sound status</p></figcaption>
+</figure>
 ```
 
-Khi ảnh đứng ngay trước một đoạn caption, pandoc tự ghép hai phần thành một figure: caption
-thành chú thích của hình, còn chữ trong hình nằm ở thuộc tính `alt`. Tương tự, caption đứng
-ngay trước một bảng sẽ thành caption của bảng (dòng `: …` bên dưới bảng).
+Tương tự, caption đứng ngay trước một bảng sẽ thành `<caption>` của bảng đó. Link tham chiếu
+chéo (`[Fig. 7‑30](#_Ref240186339)`) trỏ tới `id` của figure hoặc của bảng.
 
-Đã kiểm thử với pandoc 3.11. Filter cần pandoc ≥ 3.0.
+`--wrap=none`: không ngắt dòng giữa cú pháp ảnh hay link.
+
+Đã kiểm thử với pandoc 3.11, cả `gfm` và `markdown`. Filter cần pandoc ≥ 3.0.
 
 ## Các bước chạy thủ công (bước convert)
 
@@ -262,7 +293,7 @@ powershell -ExecutionPolicy Bypass -File .\Convert-ShapesToPictures.ps1 -InputPa
 powershell -ExecutionPolicy Bypass -File .\Convert-ShapesToPictures.ps1 -InputPath .\input.docx
 
 # 3. Chạy pandoc trên file đã convert
-pandoc -f docx -t markdown --wrap=none --extract-media=./images --lua-filter=.\pandoc\figures.lua .\input.shapes.docx -o output.md
+pandoc -f docx -t gfm --wrap=none --extract-media=./images --lua-filter=.\pandoc\figures.lua .\input.shapes.docx -o output.md
 
 # 4. Gate: fail nếu còn đối tượng pandoc sẽ bỏ qua; cảnh báo (không fail) nếu số caption > số ảnh
 powershell -ExecutionPolicy Bypass -File .\Test-DocxDrawings.ps1 -Docx .\input.shapes.docx -Markdown .\output.md

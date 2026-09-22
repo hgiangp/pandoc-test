@@ -9,13 +9,11 @@ khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
 | ID | Ưu tiên | Vấn đề | Dữ kiện đã có | Bước tiếp theo |
 |---|---|---|---|---|
 | B-01 | P1 | **Mất số trong caption ở file `.md` cuối cùng** (`Fig. ‑ …`), có chỗ mất cả chữ "Table" | `input.shapes.docx` vẫn có đủ số (bạn đã kiểm tra), nên lỗi nằm ở bước pandoc. File mẫu có field `STYLEREF 1 \s` + `SEQ … \s 1` chạy với pandoc **3.11** vẫn ra đủ `7‑30`. Vậy nhiều khả năng do **phiên bản pandoc** trên máy test, hoặc cấu trúc field thật khác với file mẫu (field lồng nhau, `fldSimple`, instrText bị tách nhiều run, chữ "Table" nằm trong field) | Kiểm tra `pandoc --version` trên máy test. Gửi XML của một đoạn caption bị lỗi (trong `word/document.xml` của `input.shapes.docx`). Hướng xử lý có thể là chuyển field thành chữ thường ở bước cleanup (quy tắc mới) hoặc dùng "Unlink Fields" ở bước convert |
-| B-02 | P2 | Caption của **bảng** vẫn giữ bookmark dạng `: []{#_Ref… .anchor}Table …` | Figure đã được xử lý trong `figures.lua`. Caption bảng dùng cú pháp `: …` riêng của pandoc markdown | Làm cùng lúc với B-03, vì cách biểu diễn phụ thuộc vào định dạng đầu ra |
 
 ## Quyết định còn mở
 
 | ID | Ưu tiên | Câu hỏi | Lựa chọn |
 |---|---|---|---|
-| D-01 | P2 | **Định dạng markdown đầu ra** cho bảng có ô nhiều đoạn (ví dụ `INFO SW / NEXT/PREV SW`) | `-t markdown`: grid table, đọc được nhưng tốn token và chỉ pandoc hiểu. `-t gfm`: bảng phức tạp xuất thành HTML, gọn hơn cho LLM/RAG. Phụ thuộc vào hệ thống sẽ đọc markdown |
 | D-02 | P2 | **Chữ trong hình** cho các bước sau (LLM…) | Hiện tại nằm trong thuộc tính `alt`. Các lựa chọn khác: một khối text ngay dưới ảnh; dùng LLM đọc ảnh để sinh mô tả; chuyển sơ đồ trạng thái (như Fig 7‑30) sang Mermaid |
 
 ## Cải tiến theo bước
@@ -45,6 +43,10 @@ khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
 | ID | Ưu tiên | Nội dung |
 |---|---|---|
 | P-01 | P3 | Pandoc đổi tên ảnh thành `imageN.png`, nên chỉ còn thuộc tính `data-shape` nối ảnh với manifest. Có thể dùng filter để đặt tên file theo Id (`S001.png`) |
+| P-02 | P2 | **Giảm token**: GFM giữ lại các thuộc tính chỉ để trình bày (`style="width:…"`, `<colgroup>`, `style` của bảng). Có thể dùng filter để bỏ bớt |
+| P-03 | P2 | **Yêu cầu với RAG**: giữ thẻ HTML, không cắt chunk giữa `<table>` hoặc `<figure>`. Cần kiểm tra khi tích hợp |
+| P-04 | P3 | Bảng không có hàng tiêu đề trong Word bị xuất thành bảng HTML, dù rất đơn giản. Có thể coi hàng đầu tiên là tiêu đề khi hàng đó in đậm hoặc có tô nền |
+| P-05 | P3 | GitHub thêm tiền tố `user-content-` vào `id`, nên link tham chiếu chéo (`#_Ref…`) có thể không nhảy đúng khi xem trên GitHub. VS Code hiển thị bình thường |
 
 ### Kiểm tra & vận hành
 
@@ -63,4 +65,5 @@ khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
 | Khung đỏ của người review làm hình bị tách, sinh ảnh khung đỏ | Quy tắc cleanup `ReviewerBoxes` |
 | Hình và bảng bị đóng trong bảng 1 ô (grid table) | Quy tắc cleanup `UnwrapLayoutTables` |
 | Alt text và title làm vỡ cú pháp ảnh (`\|`, ngắt dòng, `shape2png`) | `pandoc\figures.lua` + `--wrap=none` |
+| Markdown đúng nhưng không hiển thị được (grid table, `{…}`, `: caption`). Trước là D-01 | Xuất `gfm`: bảng đơn giản thành bảng pipe, bảng phức tạp và hình thành HTML. Bookmark của caption bảng (trước là B-02) thành `id` HTML hợp lệ |
 | Đường dẫn sai trong `.bat` sau lệnh `shift` | Lưu thư mục script trước khi `shift` |

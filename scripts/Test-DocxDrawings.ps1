@@ -130,12 +130,14 @@ Write-Host ("Objects pandoc will drop: {0}" -f $lost)
 
 if ($Markdown) {
     $md = Get-Content -LiteralPath $Markdown -Raw -Encoding UTF8
-    # alt text may contain escaped brackets (\]) and line breaks
-    $images = [regex]::Matches($md, '!\[(?:\\.|[^\]\\])*\]\(|<img\s').Count
+    # alt text may contain escaped brackets (\]), one level of nested brackets ([]{#id .anchor})
+    # and line breaks
+    $images = [regex]::Matches($md, '!\[(?:\\.|\[[^\]]*\]|[^\]\\])*\]\(|<img\s').Count
     $mdEmf = [regex]::Matches($md, '\.(emf|wmf)[)"\s]').Count
-    # heuristic: "Fig. N-N" at the start of a line / table cell / figure caption "![Fig. N-N",
-    # optionally after an anchor span
-    $capMatches = [regex]::Matches($md, '(?m)(?:^|\|)\s*(?:!\[)?(?:\[\]\{[^}]*\}\s*)?(?:Fig\.?|Figure|H[i\u00ec]nh)\s*(\d+(?:[.\-\u2011\u2013]\d+)*)')
+    # heuristic: "Fig. N-N" at the start of a line / table cell / figure caption, in both
+    # output formats: "![Fig. N-N" (markdown) or "<figcaption><p>Fig. N-N" / "<p>Fig. N-N" (gfm),
+    # optionally after an anchor span ("[]{#id .anchor}" or "<span id=.. class=anchor></span>")
+    $capMatches = [regex]::Matches($md, '(?m)(?:^|\||<figcaption>|<p>)\s*(?:!\[)?(?:\[\]\{[^}]*\}\s*|<span[^>]*>\s*</span>\s*)?(?:Fig\.?|Figure|H[i\u00ec]nh)\s*(\d+(?:[.\-\u2011\u2013]\d+)*)')
     $captions = @($capMatches | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
     Write-Host "`n== $Markdown"
     Write-Host ("Images: {0} (EMF/WMF references: {1}); distinct figure captions: {2}" -f $images, $mdEmf, $captions.Count)

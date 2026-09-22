@@ -36,6 +36,9 @@ param(
     [ValidateSet('', 'Report', 'Apply')][string]$CleanupMode = '',
     # Run pandoc without pandoc\figures.lua (for comparison)
     [switch]$NoFigureFilter,
+    # gfm: renders on GitHub/VS Code, complex tables and figures as HTML (default)
+    # markdown: Pandoc Markdown (grid tables, {attributes}), only pandoc-aware tools render it
+    [ValidateSet('gfm', 'markdown')][string]$OutputFormat = 'gfm',
     # Passed through to Convert-ShapesToPictures.ps1
     [int]$Dpi = 200,
     [switch]$IncludeTextBoxes,
@@ -137,7 +140,7 @@ try {
     #      --wrap=none: never break an image/link over several lines
     #      figures.lua: clean title/alt of converted drawings, move caption anchors to figures
     Write-Stage '[4/5] pandoc'
-    $pandocArgs = @('-f', 'docx', '-t', 'markdown', '--wrap=none', '--extract-media=./images')
+    $pandocArgs = @('-f', 'docx', '-t', $OutputFormat, '--wrap=none', '--extract-media=./images')
     if (-not $NoFigureFilter) { $pandocArgs += "--lua-filter=$(Join-Path $PSScriptRoot 'pandoc\figures.lua')" }
     Write-Host ("pandoc " + ($pandocArgs -join ' '))
     Push-Location $workDir
