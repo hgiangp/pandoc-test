@@ -1,15 +1,27 @@
 {
   "version": 1,
-  "description": "Customer NS: reviewers drew red rounded rectangles around content to highlight it.",
+  "description": "Customer NS: reviewers drew red rounded rectangles to highlight content; figures and tables are wrapped with their caption in one-cell layout tables. Rules run in this order.",
   "rules": {
     "ReviewerBoxes": {
       "mode": "Apply",
-      "colors": ["FF0000", "C00000", "E60012"],
+      "colors": [
+        "FF0000",
+        "C00000",
+        "E60012"
+      ],
       "colorTolerance": 60,
       "matchRedHue": true,
-      "geometries": ["rect", "roundRect"],
+      "geometries": [
+        "rect",
+        "roundRect"
+      ],
       "maxFillOpacity": 0.1,
       "includeInGroups": false
+    },
+    "UnwrapLayoutTables": {
+      "mode": "Apply",
+      "maxRows": 4,
+      "unwrapWithoutCaption": false
     }
   }
 }

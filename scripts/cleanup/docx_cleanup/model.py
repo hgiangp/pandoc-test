@@ -25,6 +25,8 @@ class Finding:
     location: str = ""
     action: str = "reported"
     ref: Optional[ShapeRef] = field(default=None, repr=False)
+    # element a non-shape rule acts on (e.g. a w:tbl)
+    target: Any = field(default=None, repr=False)
 
     def to_row(self) -> dict[str, Any]:
         return {

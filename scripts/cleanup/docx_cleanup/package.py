@@ -70,6 +70,7 @@ class DocxPackage:
         self._trees: dict[str, etree._Element] = {}
         self._dirty: set[str] = set()
         self._theme: Optional[dict[str, str]] = None
+        self._caption_styles: Optional[set[str]] = None
 
     # ------------------------------------------------------------ parts
 
@@ -128,7 +129,63 @@ class DocxPackage:
         self._theme = colors
         return colors
 
+    # ------------------------------------------------------------ styles
+
+    def caption_style_ids(self) -> set[str]:
+        """Ids of the built-in Caption style and of every style based on it.
+
+        Matched by style *name*: localized Word writes ids like 'a3', but the name of a
+        built-in style is always the English 'caption'.
+        """
+        if self._caption_styles is not None:
+            return self._caption_styles
+        ids: set[str] = set()
+        if "word/styles.xml" in self._data:
+            based_on: dict[str, str] = {}
+            for st in self.xml("word/styles.xml").iter(q("w:style")):
+                sid = st.get(q("w:styleId"), "")
+                name = st.find("w:name", NS)
+                if name is not None and name.get(q("w:val"), "").lower() == "caption":
+                    ids.add(sid)
+                base = st.find("w:basedOn", NS)
+                if base is not None:
+                    based_on[sid] = base.get(q("w:val"), "")
+            changed = True
+            while changed:
+                changed = False
+                for sid, base in based_on.items():
+                    if base in ids and sid not in ids:
+                        ids.add(sid)
+                        changed = True
+        self._caption_styles = ids
+        return ids
+
+    def is_caption(self, p: etree._Element) -> bool:
+        """Caption style (or derived), or a paragraph holding a SEQ field (Insert Caption)."""
+        style = p.find("w:pPr/w:pStyle", NS)
+        if style is not None and style.get(q("w:val"), "") in self.caption_style_ids():
+            return True
+        for instr in p.iter(q("w:instrText")):
+            if re.search(r"\bSEQ\b", instr.text or ""):
+                return True
+        for fld in p.iter(q("w:fldSimple")):
+            if re.search(r"\bSEQ\b", fld.get(q("w:instr"), "")):
+                return True
+        return False
+
     # ------------------------------------------------------------ discovery
+
+    def iter_tables(self) -> Iterator[tuple[str, etree._Element, int]]:
+        """(part, w:tbl, paragraph index of its first paragraph), outer tables first."""
+        for part in self.story_parts:
+            root = self.xml(part)
+            para_index = _paragraph_index(root)
+            for tbl in root.iter(q("w:tbl")):
+                if has_ancestor(tbl, "w:txbxContent") or has_ancestor(tbl, "mc:Fallback"):
+                    continue
+                first = tbl.find(".//w:p", NS)
+                yield part, tbl, para_index.get(first, -1) if first is not None else -1
+
 
     def iter_shapes(self) -> Iterator[ShapeRef]:
         """All DrawingML (wps:wsp) and VML shapes, ignoring mc:Fallback copies."""
@@ -224,6 +281,34 @@ class DocxPackage:
             else:
                 el.getparent().remove(el)
         self.mark_dirty(ref.part)
+
+    def unwrap_table(self, part: str, tbl: etree._Element) -> None:
+        """Replace a single-column table by the content of its cells, in order.
+
+        Paragraphs, nested tables and bookmarks move out as they are; only the table, row
+        and cell wrappers (and their properties) disappear. A cell always ends with a
+        paragraph, so the moved content never leaves two tables directly adjacent.
+        """
+        parent = tbl.getparent()
+        pos = parent.index(tbl)
+        moved: list[etree._Element] = []
+        for child in tbl:
+            if child.tag in (q("w:tblPr"), q("w:tblGrid")):
+                continue
+            if child.tag != q("w:tr"):
+                moved.append(child)          # e.g. bookmarkStart/End between rows
+                continue
+            for row_child in child:
+                if row_child.tag in (q("w:trPr"), q("w:tblPrEx")):
+                    continue
+                if row_child.tag != q("w:tc"):
+                    moved.append(row_child)
+                    continue
+                moved.extend(c for c in row_child if c.tag != q("w:tcPr"))
+        parent.remove(tbl)
+        for offset, el in enumerate(moved):
+            parent.insert(pos + offset, el)
+        self.mark_dirty(part)
 
     def remove_drawing_of(self, el: etree._Element) -> None:
         drawing = _ancestor(el, "w:drawing")

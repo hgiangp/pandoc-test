@@ -6,6 +6,7 @@ rem Usage:   run-all.bat input.docx [options]
 rem Options: -Profile ns              data cleanup profile (profiles\ns.json); default: no cleanup
 rem          -CleanupMode Report      cleanup only reports, changes nothing
 rem          -NoCleanup               skip data cleanup
+rem          -NoFigureFilter          run pandoc without pandoc\figures.lua
 rem          -Dpi 300 -IncludeTextBoxes -KeepMetafiles -NoCluster -NoTrim -Visible
 rem Output next to input.docx: input.clean.docx, input.shapes.docx, input.md, images\,
 rem          input.cleanup-manifest.csv, input.shapes\manifest.csv, input.pipeline.log
@@ -37,7 +38,7 @@ echo [ERROR] File not found: "%~f1"
 goto fail
 
 :usage
-echo Usage: %~nx0 input.docx [-Profile ns] [-CleanupMode Report] [-NoCleanup] [-Dpi 300] [-IncludeTextBoxes] [-KeepMetafiles] [-NoCluster] [-NoTrim] [-Visible]
+echo Usage: %~nx0 input.docx [-Profile ns] [-CleanupMode Report] [-NoCleanup] [-NoFigureFilter] [-Dpi 300] [-IncludeTextBoxes] [-KeepMetafiles] [-NoCluster] [-NoTrim] [-Visible]
 :fail
 if not defined NOPAUSE pause
 exit /b 1

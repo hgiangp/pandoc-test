@@ -1,24 +1,52 @@
 # Pipeline docx → markdown (pandoc) cho dữ liệu NS
 
 Pandoc bỏ qua các hình vẽ bằng Word Shapes mà không cảnh báo (canvas, group, autoshape,
-SmartArt, chart). Ngoài ra, dữ liệu của khách hàng NS có các khung đỏ do người review tự vẽ
-để đánh dấu. Các khung này không mang thông tin, nhưng làm hình bị tách nhỏ hoặc sinh ra
-ảnh khung đỏ thừa. Pipeline dưới đây xử lý cả hai vấn đề **trước** khi chạy pandoc.
+SmartArt, chart). Ngoài ra, dữ liệu của khách hàng NS có hai đặc trưng riêng:
+- Các **khung đỏ** do người review tự vẽ để đánh dấu. Khung không mang thông tin, nhưng làm
+  hình bị tách nhỏ hoặc sinh ra ảnh khung đỏ thừa.
+- Hình và bảng được đặt cùng caption trong một **bảng 1 ô dùng để dàn trang**. Pandoc vì vậy
+  xuất cả khối thành grid table, và ảnh cùng bảng hiển thị như bị đóng trong một ô.
+
+Pipeline dưới đây xử lý các vấn đề này trước và trong bước pandoc.
 
 ```
 input.docx
  ├─[1] preflight   Test-DocxDrawings.ps1        đếm các hình pandoc sẽ bỏ qua
  ├─[2] cleanup     cleanup\ (Python)            làm sạch dữ liệu theo profile, bật/tắt được → input.clean.docx
+ │                   ReviewerBoxes → UnwrapLayoutTables   (profile ns)
  ├─[3] convert     Convert-ShapesToPictures.ps1 chuyển hình vẽ sang PNG bằng Word  → input.shapes.docx
- ├─[4] pandoc                                                                    → input.md + images\
+ ├─[4] pandoc      --wrap=none --lua-filter=pandoc\figures.lua                    → input.md + images\
  └─[5] gate        Test-DocxDrawings.ps1        kiểm tra không còn hình nào bị mất
 ```
 
 - Bước **cleanup** xử lý vấn đề riêng của **dữ liệu**. Bước **convert** vá giới hạn của
   **pandoc**. Hai bước được tách riêng: tắt cleanup thì pipeline chạy y như trước.
-- Cleanup chạy trước convert, để khung đỏ không bị gom chung với hình thật.
+- Cleanup chạy trước convert, để khung đỏ không bị gom chung với hình thật, và để ảnh PNG
+  được chèn ra ngoài bảng, ngay trước caption.
 - Mỗi bước ghi ra file docx mới. Mọi file trung gian đều được giữ lại để mở bằng Word kiểm
   tra. File gốc không bao giờ bị sửa.
+
+### Nguyên tắc: xử lý ở bước nào?
+
+Khi gặp một trường hợp mới, chọn bước theo **bản chất** của vấn đề:
+
+| Bản chất của vấn đề | Xử lý ở | Ví dụ |
+|---|---|---|
+| **Nhiễu cấu trúc của dữ liệu nguồn**: những thứ không phải nội dung, do cách soạn thảo hoặc review | **Cleanup** (quy tắc Python sửa XML của docx, bật/tắt theo profile) | Khung đỏ của người review, bảng 1 ô dùng để dàn trang |
+| **Giới hạn của pandoc** với một loại đối tượng Word | **Convert** (dùng Word) | Shape, canvas, SmartArt, chart, OLE, EMF |
+| **Cách trình bày đầu ra**, phụ thuộc vào ai đọc markdown | **Lua filter trong pandoc** (sửa trên AST) | Alt text, title và id của ảnh, định dạng bảng, caption của bảng |
+| Chỉnh sửa thuần văn bản trên file `.md` | Bước hậu xử lý bằng chữ, **chỉ khi thật cần** | Chuẩn hóa khoảng trắng |
+
+Lý do:
+- **Sửa cấu trúc ở nguồn thì pandoc hiểu đúng cấu trúc.** Ví dụ: sau khi gỡ bảng bọc ở
+  docx, pandoc tự ghép ảnh với caption thành figure, tự gắn caption cho bảng và giữ bookmark.
+  Gỡ ở sau thì phải tự dựng lại những thứ đó.
+- Ở mức docx còn đọc được thông tin Word (style Caption, field SEQ, màu và hình dạng shape);
+  sang markdown thì các thông tin này đã mất.
+- **Không sửa cấu trúc bằng regex trên file `.md`.** Grid table, ký tự escape và ngắt dòng làm
+  cách này rất dễ vỡ. Việc cần làm sau pandoc thì làm trên AST bằng Lua filter.
+- Logic riêng của một bộ dữ liệu phải nằm trong profile của cleanup, không trộn vào các bước
+  chung (convert, pandoc).
 
 ## Cài đặt (một lần trên máy chạy)
 
@@ -47,8 +75,9 @@ run-all.bat input.docx -Profile ns -CleanupMode Report
 rem Chạy thật với profile NS
 run-ns.bat input.docx
 
-rem So sánh với khi không làm sạch
+rem So sánh với khi không làm sạch / không dùng filter của pandoc
 run-all.bat input.docx -NoCleanup
+run-all.bat input.docx -Profile ns -NoFigureFilter
 ```
 
 Kết quả nằm cạnh `input.docx`:
@@ -78,7 +107,9 @@ Mỗi profile là một file JSON trong `profiles\`. Trong profile, mỗi quy t�
 | `Apply`  | Nhận diện và xử lý (xóa)                           |
 
 - `default.json`: mọi quy tắc `Off`. Bước cleanup được bỏ qua và không cần uv/Python.
-- `ns.json`: `ReviewerBoxes` = `Apply`.
+- `ns.json`: `ReviewerBoxes` rồi `UnwrapLayoutTables`, cả hai `Apply`. **Các quy tắc chạy
+  theo đúng thứ tự trong profile.** ReviewerBoxes phải chạy trước, để khung đỏ nằm trong bảng
+  bọc bị xóa trước khi nội dung của bảng được đưa ra ngoài.
 - Tham số `-CleanupMode Report` (trong `run-all.bat`) hoặc `--mode Report` (trong
   `cleanup.bat`) ép mọi quy tắc **đang bật** chạy ở chế độ Report. Tham số này không bao giờ
   bật một quy tắc đang `Off`.
@@ -115,11 +146,36 @@ Khi xóa:
   còn khớp với nội dung mới; Word sẽ tạo lại phần này ở bước convert. Nếu group không còn
   shape nào thì xóa luôn group.
 
+### Quy tắc `UnwrapLayoutTables`: bảng 1 ô bọc hình/bảng và caption
+
+Một bảng được coi là **bảng bọc để dàn trang** khi thỏa tất cả điều kiện sau:
+
+| Điều kiện | Tham số | Mặc định |
+|---|---|---|
+| Chỉ có 1 cột (mỗi hàng đúng 1 ô) | – | – |
+| Không quá `maxRows` hàng, ví dụ hình ở hàng 1 và caption ở hàng 2 | `maxRows` | `4` |
+| Chứa hình (drawing, picture, OLE) hoặc một bảng con | – | – |
+| Có caption: style Caption (hoặc style kế thừa từ nó), hoặc đoạn văn chứa field `SEQ` | – | – |
+
+Style Caption được tìm theo **tên** (`caption`), không theo id. Word bản địa hóa (tiếng Nhật,
+tiếng Việt…) lưu id dạng `a3`, nhưng tên style dựng sẵn thì luôn là tiếng Anh.
+
+| Mức tin cậy | Khi nào | Xử lý ở chế độ Apply |
+|---|---|---|
+| `high` | Thỏa hết điều kiện | Gỡ bảng bọc: nội dung trong ô (đoạn văn, ảnh, bảng con, bookmark) được đưa ra ngoài theo đúng thứ tự |
+| `medium` | Có hình/bảng con nhưng không có caption | Chỉ gỡ khi `unwrapWithoutCaption: true` |
+| `low` | Vượt `maxRows`, hoặc chỉ chứa chữ (ví dụ khung Note) | Chỉ báo cáo |
+
+Bảng nhiều cột, ví dụ hai hình đặt cạnh nhau, **không bao giờ** bị gỡ.
+
+Bookmark `_Ref…` (đích của các link "Fig. 7‑30", "Table 1‑2") đi theo caption, nên tham
+chiếu chéo vẫn hoạt động sau khi gỡ.
+
 ### Đọc `input.cleanup-manifest.csv`
 
 | Cột                                      | Ý nghĩa                                                                                                                      |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `Action`                                | `removed`, `reported` hoặc `reported (set includeInGroups to remove)`                                                   |
+| `Action` | `removed`, `unwrapped`, `reported`, hoặc `reported (set … to …)` khi quy tắc cần bật thêm tham số mới xử lý |
 | `Confidence` / `Reason`               | Mức tin cậy; với mức`low`, cột này ghi điều kiện bị trượt (`fails: fill`, `fails: text`, …)                 |
 | `Part`, `Paragraph`                   | Phần tài liệu (document, header, …) và số thứ tự paragraph chứa shape                                                 |
 | `Location`                              | Chữ của paragraph đó, hoặc của paragraph không rỗng kế tiếp (thường là caption), giúp tìm lại shape trong Word |
@@ -168,6 +224,29 @@ uv add <package>                         # thêm dependency (tự cập nhật u
 uv lock --upgrade                        # nâng phiên bản các thư viện
 ```
 
+## Bước pandoc: `pandoc\figures.lua`
+
+Lua filter chạy trong pandoc, xử lý các ảnh do bước convert tạo ra:
+
+| Việc | Trước | Sau |
+|---|---|---|
+| Title `shape2png:S001` (dùng để đối chiếu với manifest) chuyển thành thuộc tính | `"shape2png:S001"` | `data-shape="S001"` |
+| Alt text chứa chữ trong hình: giữ lại cho LLM, bỏ dấu `\|` vốn gây xung đột với cú pháp bảng | `Drawing converted to image. Text: A \| B` | `Text in figure: A; B` |
+| Bookmark trong caption của figure chuyển lên figure, bỏ ngoặc vuông lồng nhau trong cú pháp ảnh | `![[]{#_Ref1 .anchor}Fig. 7‑30 …](…)` | `![Fig. 7‑30 …](…){#_Ref1 …}` |
+
+Kết hợp với `--wrap=none` (không ngắt dòng giữa cú pháp ảnh hay link) và việc gỡ bảng bọc,
+mỗi hình giờ là một dòng:
+
+```markdown
+![Fig. 7‑30 Transition of alarm sound status](images/media/image19.png){#_Ref240186339 alt="Text in figure: Sound span; Not sound span; S1; S4; S3; S2" width="2.5in" height="2.38in" data-shape="S001"}
+```
+
+Khi ảnh đứng ngay trước một đoạn caption, pandoc tự ghép hai phần thành một figure: caption
+thành chú thích của hình, còn chữ trong hình nằm ở thuộc tính `alt`. Tương tự, caption đứng
+ngay trước một bảng sẽ thành caption của bảng (dòng `: …` bên dưới bảng).
+
+Đã kiểm thử với pandoc 3.11. Filter cần pandoc ≥ 3.0.
+
 ## Các bước chạy thủ công (bước convert)
 
 ```powershell
@@ -183,7 +262,7 @@ powershell -ExecutionPolicy Bypass -File .\Convert-ShapesToPictures.ps1 -InputPa
 powershell -ExecutionPolicy Bypass -File .\Convert-ShapesToPictures.ps1 -InputPath .\input.docx
 
 # 3. Chạy pandoc trên file đã convert
-pandoc -f docx -t markdown --extract-media=./images .\input.shapes.docx -o output.md
+pandoc -f docx -t markdown --wrap=none --extract-media=./images --lua-filter=.\pandoc\figures.lua .\input.shapes.docx -o output.md
 
 # 4. Gate: fail nếu còn đối tượng pandoc sẽ bỏ qua; cảnh báo (không fail) nếu số caption > số ảnh
 powershell -ExecutionPolicy Bypass -File .\Test-DocxDrawings.ps1 -Docx .\input.shapes.docx -Markdown .\output.md
@@ -230,6 +309,8 @@ Exit code: `0` là OK, `2` là có đối tượng convert thất bại (xem c�
    nên thông tin vẫn tìm kiếm được và dùng được cho RAG/LLM.
 
 ## Giới hạn đã biết
+
+Các điểm cải tiến và vấn đề đã biết nhưng chưa xử lý được theo dõi trong [BACKLOG.md](BACKLOG.md).
 
 - Nếu caption nằm trong một text box floating cạnh hình, text box đó có thể bị gộp vào
   cluster và render thành ảnh. Caption khi đó chỉ còn trong alt text. Nên kiểm tra các

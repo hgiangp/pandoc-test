@@ -79,8 +79,8 @@ def run(input_path: Path, output_path: Path, config: dict[str, Any],
         if mode == "Apply":
             rule.apply(pkg, found)
         findings.extend(found)
-        removed = sum(1 for f in found if f.action == "removed")
-        print(f"  {rule_id} [{mode}]: {len(found)} found, {removed} removed")
+        changed = sum(1 for f in found if not f.action.startswith("reported"))
+        print(f"  {rule_id} [{mode}]: {len(found)} found, {changed} changed")
 
     if pkg.dirty_parts:
         pkg.save(output_path)

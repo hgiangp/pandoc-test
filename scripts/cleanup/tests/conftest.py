@@ -26,7 +26,17 @@ CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
 <Override PartName="/word/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 </Types>"""
+
+# Localized Word: built-in Caption has id "a3" but English name "caption";
+# "FigCaption" is a custom style based on it.
+STYLES = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles {'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'}>
+<w:style w:type="paragraph" w:default="1" w:styleId="a"><w:name w:val="Normal"/></w:style>
+<w:style w:type="paragraph" w:styleId="a3"><w:name w:val="caption"/><w:basedOn w:val="a"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="FigCaption"><w:name w:val="Fig Caption"/><w:basedOn w:val="a3"/></w:style>
+</w:styles>"""
 
 ROOT_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -62,6 +72,10 @@ def sp_pr(geom: str = "roundRect", fill: str = "<a:noFill/>", line: str = "") ->
 def ln(color: str = "FF0000", w: int = 28575, scheme: bool = False) -> str:
     clr = f'<a:schemeClr val="{color}"/>' if scheme else f'<a:srgbClr val="{color}"/>'
     return f'<a:ln w="{w}"><a:solidFill>{clr}</a:solidFill></a:ln>'
+
+
+# red rounded rectangle without fill: a reviewer box
+RED_BOX_SPPR = sp_pr("roundRect", "<a:noFill/>", ln("FF0000"))
 
 
 def solid(color: str, alpha: int | None = None) -> str:
@@ -121,6 +135,29 @@ def para(drawing: str = "", text: str = "") -> str:
     return f"<w:p>{run_d}{run_t}</w:p>"
 
 
+def caption(text: str, style: str = "a3", seq: bool = True) -> str:
+    """Caption paragraph as Insert Caption writes it: label + SEQ field + text."""
+    ppr = f'<w:pPr><w:pStyle w:val="{style}"/></w:pPr>' if style else ""
+    field = ('<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+             '<w:r><w:instrText xml:space="preserve"> SEQ Figure \\* ARABIC </w:instrText></w:r>'
+             '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>30</w:t></w:r>'
+             '<w:r><w:fldChar w:fldCharType="end"/></w:r>') if seq else ""
+    return f'<w:p>{ppr}<w:r><w:t xml:space="preserve">Fig. </w:t></w:r>{field}<w:r><w:t xml:space="preserve"> {text}</w:t></w:r></w:p>'
+
+
+def table(*rows: str, cols: int = 1) -> str:
+    """rows: the XML content of each cell (one cell per row unless cols > 1)."""
+    trs = "".join("<w:tr>" + f"<w:tc><w:tcPr/>{r}</w:tc>" * cols + "</w:tr>" for r in rows)
+    grid = "<w:gridCol/>" * cols
+    return f'<w:tbl><w:tblPr/><w:tblGrid>{grid}</w:tblGrid>{trs}</w:tbl>'
+
+
+def inline_picture() -> str:
+    return ('<w:p><w:r><w:drawing><wp:inline><wp:docPr id="99" name="Picture 99"/>'
+            '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+            '<pic:pic/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>')
+
+
 @pytest.fixture
 def make_docx(tmp_path):
     counter = {"n": 0}
@@ -137,6 +174,7 @@ def make_docx(tmp_path):
             zf.writestr("word/document.xml", doc)
             zf.writestr("word/_rels/document.xml.rels", DOC_RELS)
             zf.writestr("word/theme/theme1.xml", theme_xml(accent2))
+            zf.writestr("word/styles.xml", STYLES)
         return path
 
     return _make

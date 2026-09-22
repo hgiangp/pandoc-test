@@ -34,6 +34,8 @@ param(
     [switch]$NoCleanup,
     # Override the mode of every enabled rule: Report = only list findings, Apply = modify
     [ValidateSet('', 'Report', 'Apply')][string]$CleanupMode = '',
+    # Run pandoc without pandoc\figures.lua (for comparison)
+    [switch]$NoFigureFilter,
     # Passed through to Convert-ShapesToPictures.ps1
     [int]$Dpi = 200,
     [switch]$IncludeTextBoxes,
@@ -132,10 +134,15 @@ try {
     if (-not (Test-Path -LiteralPath $shapesDocx)) { throw "Converted file was not created: $shapesDocx" }
 
     # ---- 4. pandoc (inside the input folder so image links stay relative: images/media/...)
+    #      --wrap=none: never break an image/link over several lines
+    #      figures.lua: clean title/alt of converted drawings, move caption anchors to figures
     Write-Stage '[4/5] pandoc'
+    $pandocArgs = @('-f', 'docx', '-t', 'markdown', '--wrap=none', '--extract-media=./images')
+    if (-not $NoFigureFilter) { $pandocArgs += "--lua-filter=$(Join-Path $PSScriptRoot 'pandoc\figures.lua')" }
+    Write-Host ("pandoc " + ($pandocArgs -join ' '))
     Push-Location $workDir
     try {
-        & pandoc -f docx -t markdown --extract-media=./images $shapesDocx -o $mdName | Out-Host
+        & pandoc @pandocArgs $shapesDocx -o $mdName | Out-Host
         $pandocRc = $LASTEXITCODE
     } finally { Pop-Location }
     if ($pandocRc -ne 0) { throw "pandoc failed with exit code $pandocRc." }
