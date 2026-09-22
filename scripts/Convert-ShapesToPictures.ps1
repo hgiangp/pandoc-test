@@ -45,7 +45,9 @@ param(
     [switch]$Visible,
     # Turn fields inside shapes into plain text instead of only locking them. Use this if
     # rendered images still show "Error! Reference source not found."
-    [switch]$UnlinkShapeFields
+    [switch]$UnlinkShapeFields,
+    # Do not write Word's automatic heading numbers ("7.5") into the heading text
+    [switch]$NoHeadingNumbers
 )
 
 $ErrorActionPreference = 'Stop'
@@ -155,6 +157,21 @@ function Protect-StoryFields($story, [bool]$unlink) {
     return $count
 }
 
+# Locks every field of the document. Needed before the heading numbers are moved into the
+# text: STYLEREF fields take the chapter number from that numbering, and would break if Word
+# updated them afterwards.
+function Protect-AllFields($doc, [bool]$unlink) {
+    $count = 0
+    foreach ($story in $doc.StoryRanges) {
+        $range = $story
+        while ($range) {
+            $count += Protect-StoryFields $range $unlink
+            $range = $range.NextStoryRange
+        }
+    }
+    return $count
+}
+
 function Protect-ShapeFields($doc, [bool]$unlink) {
     $count = 0
     try {
@@ -165,6 +182,40 @@ function Protect-ShapeFields($doc, [bool]$unlink) {
     while ($story) {
         $count += Protect-StoryFields $story $unlink
         $story = $story.NextStoryRange
+    }
+    return $count
+}
+
+# pandoc ignores Word's automatic heading numbering, so "7.5 Sound status" becomes
+# "Sound status" and every cross reference to 7.5 loses its target. Word already knows the
+# number of each heading (ListFormat.ListString); write it into the text and switch the
+# automatic numbering off so the intermediate document does not show it twice.
+function Add-HeadingNumbers($doc) {
+    $numbers = @{}
+    # pass 1: read only, so removing a number cannot influence the numbers read afterwards
+    for ($i = 1; $i -le $doc.Paragraphs.Count; $i++) {
+        try {
+            $p = $doc.Paragraphs.Item($i)
+            $level = [int]$p.OutlineLevel
+            if ($level -lt 1 -or $level -gt 9) { continue }
+            $listString = ''
+            try { $listString = ([string]$p.Range.ListFormat.ListString).Trim() } catch {}
+            if ($listString) { $numbers[$i] = $listString }
+        } catch {}
+    }
+
+    $count = 0
+    foreach ($i in ($numbers.Keys | Sort-Object)) {
+        try {
+            $p = $doc.Paragraphs.Item($i)
+            $listString = $numbers[$i]
+            $text = (($p.Range.Text -replace '[\r\a\v\f]', '')).TrimStart()
+            if (-not $text.StartsWith($listString)) {
+                $p.Range.InsertBefore($listString + ' ')
+                $count++
+            }
+            $p.Range.ListFormat.RemoveNumbers()
+        } catch {}
     }
     return $count
 }
@@ -370,11 +421,13 @@ try {
     }
     $doc.Activate()
 
-    # ---- keep the fields inside shapes as they are now (before any conversion)
+    # ---- freeze the fields as they are now (before any conversion or renumbering)
     if (-not $DryRun) {
         try { $word.Options.UpdateFieldsAtPrint = $false } catch {}
-        $protected = Protect-ShapeFields $doc ([bool]$UnlinkShapeFields)
-        Write-Host ("Fields inside shapes {0}: {1}" -f $(if ($UnlinkShapeFields) { 'unlinked' } else { 'locked' }), $protected)
+        Write-Host ("Fields locked: {0}" -f (Protect-AllFields $doc $false))
+        if ($UnlinkShapeFields) {
+            Write-Host ("Fields inside shapes unlinked: {0}" -f (Protect-ShapeFields $doc $true))
+        }
     }
 
     # ---- pass 1: floating shapes (main story)
@@ -505,6 +558,11 @@ try {
             $entry.Error = $_.Exception.Message
             Write-Warning ("  [{0}] FAILED {1} p.{2}: {3}" -f $entry.Id, $typeName, $entry.Page, $entry.Error)
         }
+    }
+
+    # ---- pass 3: heading numbers into the text (pandoc drops Word's automatic numbering)
+    if (-not $DryRun -and -not $NoHeadingNumbers) {
+        Write-Host ("Headings numbered: {0}" -f (Add-HeadingNumbers $doc))
     }
 
     if (-not $DryRun) {

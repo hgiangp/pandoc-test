@@ -11,6 +11,7 @@ rem          -NoFigureFilter          run pandoc without pandoc\figures.lua
 rem          -NoMediaConvert          keep extracted EMF/WMF instead of converting them to PNG
 rem          -OutputFormat markdown   Pandoc Markdown instead of gfm (default)
 rem          -UnlinkShapeFields       fields in shapes to plain text (if images show "Error! Reference source...")
+rem          -NoHeadingNumbers        do not write Word heading numbers ("7.5") into the heading text
 rem          -Dpi 300 -IncludeTextBoxes -KeepMetafiles -NoCluster -NoTrim -Visible
 rem Output next to input.docx: input.clean.docx, input.shapes.docx, input.pandoc.docx, input.md, images\,
 rem          input.cleanup-manifest.csv, input.shapes\manifest.csv, input.pandoc-manifest.csv, input.pipeline.log
@@ -42,7 +43,7 @@ echo [ERROR] File not found: "%~f1"
 goto fail
 
 :usage
-echo Usage: %~nx0 input.docx [-Profile ns] [-CleanupMode Report] [-NoCleanup] [-NoPandocPrep] [-NoFigureFilter] [-NoMediaConvert] [-OutputFormat markdown] [-Dpi 300] [-IncludeTextBoxes] [-KeepMetafiles] [-NoCluster] [-NoTrim] [-Visible] [-UnlinkShapeFields]
+echo Usage: %~nx0 input.docx [-Profile ns] [-CleanupMode Report] [-NoCleanup] [-NoPandocPrep] [-NoFigureFilter] [-NoMediaConvert] [-OutputFormat markdown] [-Dpi 300] [-IncludeTextBoxes] [-KeepMetafiles] [-NoCluster] [-NoTrim] [-Visible] [-UnlinkShapeFields] [-NoHeadingNumbers]
 :fail
 if not defined NOPAUSE pause
 exit /b 1

@@ -368,6 +368,7 @@ của các shape floating.
 | `-DryRun`           | tắt                    | Chỉ liệt kê                                                                                                                       |
 | `-Visible` | tắt | Hiện cửa sổ Word để debug |
 | `-UnlinkShapeFields` | tắt | Chuyển field trong shape thành chữ thường trước khi render. Chỉ dùng khi ảnh vẫn hiện `Error! Reference source not found.` |
+| `-NoHeadingNumbers` | tắt | Không ghi số mục của Word ("7.5") vào tiêu đề |
 
 Exit code: `0` là OK, `2` là có đối tượng convert thất bại (xem cột `Error` trong manifest).
 
@@ -394,8 +395,17 @@ Exit code: `0` là OK, `2` là có đối tượng convert thất bại (xem c�
    cho mọi field nằm trong shape (`wdTextFrameStory`) ngay sau khi mở tài liệu, và tắt
    `Options.UpdateFieldsAtPrint`. Field đã khóa thì Word không cập nhật, nên giá trị hiện tại
    được giữ nguyên. Nếu vẫn lỗi, dùng `-UnlinkShapeFields` để chuyển field thành chữ thường.
-4. EMF được render sang PNG bằng GDI+. PNG được gán DPI để Word giữ đúng kích thước in.
-5. **Text trong hình** (các ô trạng thái, nhãn mũi tên...) được ghi vào alt text của ảnh.
+4. **Ghi số mục vào tiêu đề.** Pandoc bỏ qua phần đánh số tự động của Word, nên `7.5 Sound
+   status` chỉ còn `Sound status`, và mọi tham chiếu "refer to 7.5" mất đích. Word đã biết số
+   của từng heading (`ListFormat.ListString`), nên script đọc số đó, ghi vào đầu tiêu đề
+   thành chữ thường, rồi tắt đánh số tự động của paragraph để file trung gian không hiện số
+   hai lần. Chỉ áp dụng cho paragraph có outline level 1–9; danh sách đánh số trong thân bài
+   không bị đụng tới, vì pandoc vốn chuyển đúng chúng thành danh sách markdown. Tiêu đề đã tự
+   gõ sẵn số thì được bỏ qua. Tắt bằng `-NoHeadingNumbers`.
+   Trước khi làm việc này, script **khóa toàn bộ field của tài liệu**: field `STYLEREF` trong
+   caption lấy số chương từ chính phần đánh số này, nên phải chặn Word cập nhật lại chúng.
+5. EMF được render sang PNG bằng GDI+. PNG được gán DPI để Word giữ đúng kích thước in.
+6. **Text trong hình** (các ô trạng thái, nhãn mũi tên...) được ghi vào alt text của ảnh.
    Pandoc xuất alt text thành `![Drawing converted to image. Text: Blank | Redisplaying ...](images/media/imageN.png)`,
    nên thông tin vẫn tìm kiếm được và dùng được cho RAG/LLM.
 

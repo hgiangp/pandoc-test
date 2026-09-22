@@ -34,7 +34,7 @@ echo [ERROR] File not found: "%~f1"
 goto fail
 
 :usage
-echo Usage: %~nx0 input.docx [-DryRun] [-Dpi 300] [-IncludeTextBoxes] [-KeepMetafiles] [-NoCluster] [-NoTrim] [-Visible] [-UnlinkShapeFields]
+echo Usage: %~nx0 input.docx [-DryRun] [-Dpi 300] [-IncludeTextBoxes] [-KeepMetafiles] [-NoCluster] [-NoTrim] [-Visible] [-UnlinkShapeFields] [-NoHeadingNumbers]
 :fail
 if not defined NOPAUSE pause
 exit /b 1
