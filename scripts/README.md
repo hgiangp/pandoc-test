@@ -369,8 +369,14 @@ của các shape floating.
 | `-Visible` | tắt | Hiện cửa sổ Word để debug |
 | `-UnlinkShapeFields` | tắt | Chuyển field trong shape thành chữ thường trước khi render. Chỉ dùng khi ảnh vẫn hiện `Error! Reference source not found.` |
 | `-NoHeadingNumbers` | tắt | Không ghi số mục của Word ("7.5") vào tiêu đề |
+| `-NoPageInfo` | tắt | Bỏ trống cột `Page` trong manifest. Mỗi lần đọc số trang, Word phải phân trang lại, nên tùy chọn này giúp chạy nhanh hơn với tài liệu dài |
 
 Exit code: `0` là OK, `2` là có đối tượng convert thất bại (xem cột `Error` trong manifest).
+
+**Tốc độ.** Bước convert in thời gian của từng phần (shape floating, shape inline, ghi số mục,
+lưu file) để dễ tìm chỗ chậm. Script tắt phân trang nền, kiểm tra chính tả và ngữ pháp, tắt vẽ
+màn hình (trừ khi dùng `-Visible`), rồi khôi phục các tùy chọn này trước khi thoát Word.
+Với tài liệu dài, `-NoPageInfo` thường là tùy chọn có tác dụng rõ nhất.
 
 ## Cách hoạt động của bước convert
 

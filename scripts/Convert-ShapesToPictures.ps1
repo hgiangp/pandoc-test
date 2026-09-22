@@ -47,7 +47,10 @@ param(
     # rendered images still show "Error! Reference source not found."
     [switch]$UnlinkShapeFields,
     # Do not write Word's automatic heading numbers ("7.5") into the heading text
-    [switch]$NoHeadingNumbers
+    [switch]$NoHeadingNumbers,
+    # Leave the Page column of the manifest empty. Reading a page number makes Word repaginate,
+    # which is slow on a long document
+    [switch]$NoPageInfo
 )
 
 $ErrorActionPreference = 'Stop'
@@ -103,6 +106,10 @@ $wdStyleNormal = -1
 $wdNoProtection = -1
 $msoAutomationSecurityForceDisable = 3
 $wdTextFrameStory = 5
+
+function Write-Elapsed([string]$label, $watch) {
+    Write-Host ("  {0}: {1:N1}s" -f $label, $watch.Elapsed.TotalSeconds)
+}
 
 # ---------------------------------------------------------------- paths
 
@@ -190,33 +197,52 @@ function Protect-ShapeFields($doc, [bool]$unlink) {
 # "Sound status" and every cross reference to 7.5 loses its target. Word already knows the
 # number of each heading (ListFormat.ListString); write it into the text and switch the
 # automatic numbering off so the intermediate document does not show it twice.
+function Get-NumberedParagraphs($doc) {
+    # ListParagraphs holds only the paragraphs that carry list numbering, so it is far smaller
+    # than Paragraphs. Some documents number headings only through the style, and then it can
+    # be empty; walk Paragraphs sequentially in that case. Never use Paragraphs.Item($i) in a
+    # loop: Word walks the document from the start on every call (quadratic).
+    $list = New-Object System.Collections.Generic.List[object]
+    try {
+        foreach ($p in $doc.ListParagraphs) { $list.Add($p) }
+    } catch {}
+    if ($list.Count -eq 0) {
+        foreach ($p in $doc.Paragraphs) { $list.Add($p) }
+    }
+    return , $list
+}
+
 function Add-HeadingNumbers($doc) {
-    $numbers = @{}
-    # pass 1: read only, so removing a number cannot influence the numbers read afterwards
-    for ($i = 1; $i -le $doc.Paragraphs.Count; $i++) {
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $targets = New-Object System.Collections.Generic.List[object]
+    $scanned = 0
+    foreach ($p in (Get-NumberedParagraphs $doc)) {
+        $scanned++
+        if ($scanned % 500 -eq 0) { Write-Host ("  scanned {0} paragraphs..." -f $scanned) }
         try {
-            $p = $doc.Paragraphs.Item($i)
             $level = [int]$p.OutlineLevel
             if ($level -lt 1 -or $level -gt 9) { continue }
-            $listString = ''
-            try { $listString = ([string]$p.Range.ListFormat.ListString).Trim() } catch {}
-            if ($listString) { $numbers[$i] = $listString }
+            $listString = ([string]$p.Range.ListFormat.ListString).Trim()
+            if ($listString) {
+                # keep the Range: it follows the text when earlier paragraphs change
+                $targets.Add([pscustomobject]@{ Range = $p.Range; Number = $listString })
+            }
         } catch {}
     }
 
     $count = 0
-    foreach ($i in ($numbers.Keys | Sort-Object)) {
+    foreach ($target in $targets) {
         try {
-            $p = $doc.Paragraphs.Item($i)
-            $listString = $numbers[$i]
-            $text = (($p.Range.Text -replace '[\r\a\v\f]', '')).TrimStart()
-            if (-not $text.StartsWith($listString)) {
-                $p.Range.InsertBefore($listString + ' ')
+            $text = (($target.Range.Text -replace '[\r\a\v\f]', '')).TrimStart()
+            if (-not $text.StartsWith($target.Number)) {
+                $target.Range.InsertBefore($target.Number + ' ')
                 $count++
             }
-            $p.Range.ListFormat.RemoveNumbers()
+            $target.Range.ListFormat.RemoveNumbers()
         } catch {}
     }
+    Write-Host ("  {0} paragraph(s) scanned, {1} numbered heading(s), {2:N1}s" -f
+                $scanned, $targets.Count, $watch.Elapsed.TotalSeconds)
     return $count
 }
 
@@ -288,6 +314,7 @@ function Get-InlineDecision($is) {
 }
 
 function Get-Page($range) {
+    if ($NoPageInfo) { return '' }
     try { return [int]$range.Information($wdActiveEndPageNumber) } catch { return '' }
 }
 
@@ -399,6 +426,7 @@ function Convert-Floating($word, $doc, $shape, $entry) {
 $word = $null
 $doc = $null
 $script:tmpDoc = $null
+$script:wordOptions = @{}
 try {
     Write-Host "Starting Word..."
     $word = New-Object -ComObject Word.Application
@@ -406,6 +434,12 @@ try {
     $word.DisplayAlerts = 0
     # Documents opened through COM run macros by default; never run macros of the input file
     $word.AutomationSecurity = $msoAutomationSecurityForceDisable
+    if (-not $Visible) { $word.ScreenUpdating = $false }
+    # Background work that only slows the conversion down. These are application-wide options
+    # kept in the user's Word settings, so remember them and restore them before quitting.
+    try { $script:wordOptions['Pagination'] = $word.Options.Pagination; $word.Options.Pagination = $false } catch {}
+    try { $script:wordOptions['Spelling'] = $word.Options.CheckSpellingAsYouType; $word.Options.CheckSpellingAsYouType = $false } catch {}
+    try { $script:wordOptions['Grammar'] = $word.Options.CheckGrammarAsYouType; $word.Options.CheckGrammarAsYouType = $false } catch {}
 
     # FileName, ConfirmConversions, ReadOnly, AddToRecentFiles
     $doc = $word.Documents.Open($InputPath, $false, $true, $false)
@@ -431,6 +465,7 @@ try {
     }
 
     # ---- pass 1: floating shapes (main story)
+    $watch = [Diagnostics.Stopwatch]::StartNew()
     $floating = @()
     for ($i = 1; $i -le $doc.Shapes.Count; $i++) { $floating += $doc.Shapes.Item($i) }
     Write-Host "Floating shapes: $($floating.Count)"
@@ -526,7 +561,10 @@ try {
         }
     }
 
+    Write-Elapsed 'floating shapes' $watch
+
     # ---- pass 2: inline shapes (main story)
+    $watch = [Diagnostics.Stopwatch]::StartNew()
     $inline = @()
     for ($i = 1; $i -le $doc.InlineShapes.Count; $i++) { $inline += $doc.InlineShapes.Item($i) }
     Write-Host "Inline shapes: $($inline.Count)"
@@ -560,20 +598,37 @@ try {
         }
     }
 
+    Write-Elapsed 'inline shapes' $watch
+
     # ---- pass 3: heading numbers into the text (pandoc drops Word's automatic numbering)
     if (-not $DryRun -and -not $NoHeadingNumbers) {
+        Write-Host 'Writing heading numbers into the text...'
         Write-Host ("Headings numbered: {0}" -f (Add-HeadingNumbers $doc))
     }
 
     if (-not $DryRun) {
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        Write-Host 'Saving (this can take a while for a large document)...'
         $doc.Save()
+        Write-Elapsed 'save' $watch
         Write-Host "Saved: $OutputPath"
     }
 }
 finally {
+    Write-Host 'Closing Word...'
     if ($script:tmpDoc) { try { $script:tmpDoc.Close($wdDoNotSaveChanges) } catch {} }
     if ($doc) { try { $doc.Close($wdDoNotSaveChanges) } catch {} }
     if ($word) {
+        if ($script:wordOptions.ContainsKey('Pagination')) {
+            try { $word.Options.Pagination = $script:wordOptions['Pagination'] } catch {}
+        }
+        if ($script:wordOptions.ContainsKey('Spelling')) {
+            try { $word.Options.CheckSpellingAsYouType = $script:wordOptions['Spelling'] } catch {}
+        }
+        if ($script:wordOptions.ContainsKey('Grammar')) {
+            try { $word.Options.CheckGrammarAsYouType = $script:wordOptions['Grammar'] } catch {}
+        }
+        try { $word.ScreenUpdating = $true } catch {}
         try { $word.Quit($wdDoNotSaveChanges) } catch {}
         [Runtime.InteropServices.Marshal]::ReleaseComObject($word) | Out-Null
     }

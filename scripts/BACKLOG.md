@@ -36,6 +36,8 @@ khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
 | V-03 | P2 | Gom shape rời thành một hình dựa vào caption: hình không có caption và neo ở nhiều paragraph có thể bị tách. Caption nằm trong text box floating có thể bị render vào ảnh |
 | V-04 | P3 | Đang dùng lại dấu phân cách ` \| ` trong alt text (`Build-AltText`), và `figures.lua` dựa vào dấu này để chuyển thành `; `. Nếu chạy không có filter thì `\|` vẫn xuất hiện |
 | V-05 | P3 | Hiệu năng: mở và đóng Word một lần cho cả lô tài liệu, thay vì mỗi file một lần |
+| V-06 | P2 | Hiệu năng bước convert: đã có số đo từng phần. Việc tiếp theo là bỏ `Range.WordOpenXML` gọi cho từng inline shape (phân loại một lần từ XML), và thay `Start-Sleep 300ms` cố định sau mỗi lần copy bằng vòng chờ thích ứng |
+| V-07 | P3 | Song song hóa: nhiều tài liệu chạy cùng lúc (mỗi tiến trình Word riêng, cần khóa clipboard vì đây là tài nguyên chung của máy), và render PNG song song trong bước convert |
 
 ### Pandoc / đầu ra
 

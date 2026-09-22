@@ -55,7 +55,8 @@ param(
     [switch]$NoTrim,
     [switch]$Visible,
     [switch]$UnlinkShapeFields,
-    [switch]$NoHeadingNumbers
+    [switch]$NoHeadingNumbers,
+    [switch]$NoPageInfo
 )
 
 $InputPath = (Resolve-Path -LiteralPath $InputPath).Path
@@ -146,7 +147,7 @@ try {
         InputPath = $convertInput; OutputPath = $shapesDocx; ImageDir = $shapesDir; Dpi = $Dpi
         IncludeTextBoxes = $IncludeTextBoxes; KeepMetafiles = $KeepMetafiles
         NoCluster = $NoCluster; NoTrim = $NoTrim; Visible = $Visible
-        UnlinkShapeFields = $UnlinkShapeFields; NoHeadingNumbers = $NoHeadingNumbers
+        UnlinkShapeFields = $UnlinkShapeFields; NoHeadingNumbers = $NoHeadingNumbers; NoPageInfo = $NoPageInfo
     }
     $convertRc = Invoke-Script "$PSScriptRoot\Convert-ShapesToPictures.ps1" $convArgs
     if ($convertRc -eq 2) { Write-Warning "Some drawings failed to convert - see $shapesDir\manifest.csv" }
