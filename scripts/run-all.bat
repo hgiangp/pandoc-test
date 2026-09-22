@@ -11,6 +11,8 @@ rem Output next to input.docx: input.clean.docx, input.shapes.docx, input.md, im
 rem          input.cleanup-manifest.csv, input.shapes\manifest.csv, input.pipeline.log
 rem Exit code: 0 = pass, 3 = finished with issues, 1 = error. Set NOPAUSE=1 for unattended runs.
 setlocal EnableExtensions
+rem Save the script folder now: SHIFT also shifts %0, so %~dp0 is wrong after it
+set "SCRIPTS=%~dp0"
 
 if "%~1"=="" goto usage
 if not exist "%~f1" goto notfound
@@ -25,7 +27,7 @@ shift
 goto collect
 
 :run
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Invoke-Pipeline.ps1" -InputPath "%INPUT%"%EXTRA%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPTS%Invoke-Pipeline.ps1" -InputPath "%INPUT%"%EXTRA%
 set "RC=%ERRORLEVEL%"
 if not defined NOPAUSE pause
 exit /b %RC%

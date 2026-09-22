@@ -5,6 +5,8 @@ rem Example: convert.bat input.docx -DryRun
 rem          convert.bat input.docx -Dpi 300 -IncludeTextBoxes
 rem Drag-and-drop a .docx onto this file also works.
 setlocal EnableExtensions
+rem Save the script folder now: SHIFT also shifts %0, so %~dp0 is wrong after it
+set "SCRIPTS=%~dp0"
 
 if "%~1"=="" goto usage
 if not exist "%~f1" goto notfound
@@ -19,7 +21,7 @@ shift
 goto collect
 
 :run
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Convert-ShapesToPictures.ps1" -InputPath "%INPUT%"%EXTRA%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPTS%Convert-ShapesToPictures.ps1" -InputPath "%INPUT%"%EXTRA%
 set "RC=%ERRORLEVEL%"
 if "%RC%"=="0" echo [OK] Done.
 if "%RC%"=="2" echo [WARN] Some drawings failed to convert - see manifest.csv, column Error.
