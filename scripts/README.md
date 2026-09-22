@@ -351,7 +351,8 @@ của các shape floating.
 | `-NoCluster`        | tắt                    | Không gộp các shape rời của cùng một hình                                                                                    |
 | `-NoTrim`           | tắt                    | Không cắt viền trắng                                                                                                             |
 | `-DryRun`           | tắt                    | Chỉ liệt kê                                                                                                                       |
-| `-Visible`          | tắt                    | Hiện cửa sổ Word để debug                                                                                                       |
+| `-Visible` | tắt | Hiện cửa sổ Word để debug |
+| `-UnlinkShapeFields` | tắt | Chuyển field trong shape thành chữ thường trước khi render. Chỉ dùng khi ảnh vẫn hiện `Error! Reference source not found.` |
 
 Exit code: `0` là OK, `2` là có đối tượng convert thất bại (xem cột `Error` trong manifest).
 
@@ -371,8 +372,15 @@ Exit code: `0` là OK, `2` là có đối tượng convert thất bại (xem c�
    (`Range.WordOpenXML`) chứ không theo kiểu COM, vì Word không phân loại đúng các
    shape/group/canvas DrawingML nằm inline. Hình được lấy qua `Range.EnhMetaFileBits`
    và thay tại chỗ.
-3. EMF được render sang PNG bằng GDI+. PNG được gán DPI để Word giữ đúng kích thước in.
-4. **Text trong hình** (các ô trạng thái, nhãn mũi tên...) được ghi vào alt text của ảnh.
+3. **Khóa field trong shape trước khi chuyển đổi.** Khi Word chuyển shape hoặc render EMF,
+   nó cập nhật lại các field trong shape, ví dụ tham chiếu chéo "refer to 7.5". Lúc đó shape
+   tạm thời tách khỏi văn bản nên không thấy bookmark, và field bị thay bằng
+   `Error! Reference source not found.`, rồi bị vẽ luôn vào ảnh. Script đặt `Locked = True`
+   cho mọi field nằm trong shape (`wdTextFrameStory`) ngay sau khi mở tài liệu, và tắt
+   `Options.UpdateFieldsAtPrint`. Field đã khóa thì Word không cập nhật, nên giá trị hiện tại
+   được giữ nguyên. Nếu vẫn lỗi, dùng `-UnlinkShapeFields` để chuyển field thành chữ thường.
+4. EMF được render sang PNG bằng GDI+. PNG được gán DPI để Word giữ đúng kích thước in.
+5. **Text trong hình** (các ô trạng thái, nhãn mũi tên...) được ghi vào alt text của ảnh.
    Pandoc xuất alt text thành `![Drawing converted to image. Text: Blank | Redisplaying ...](images/media/imageN.png)`,
    nên thông tin vẫn tìm kiếm được và dùng được cho RAG/LLM.
 
@@ -418,4 +426,5 @@ Các điểm cải tiến và vấn đề đã biết nhưng chưa xử lý đư
 | File tải từ mạng không mở được                      | `Unblock-File .\input.docx`                                                                                             |
 | Treo hoặc lỗi COM                                         | Đóng hết Word (`Get-Process WINWORD \| Stop-Process`), rồi chạy lại với `-Visible` để xem Word đang báo gì |
 | Nhiều dòng`FAILED` với `clipboard`/`Paste Special` | Không dùng clipboard trong lúc chạy; tắt các app quản lý clipboard                                                |
+| Ảnh hiện `Error! Reference source not found.` | Field trong shape bị Word cập nhật lúc render. Script đã khóa field; nếu vẫn lỗi, chạy lại với `-UnlinkShapeFields`. Cột `Text` trong manifest cho biết chữ đúng là gì |
 | PNG bị cắt hoặc thừa viền                              | Chạy với`-NoTrim`, rồi so với file `.emf` tương ứng                                                            |

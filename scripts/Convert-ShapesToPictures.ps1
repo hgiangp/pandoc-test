@@ -42,7 +42,10 @@ param(
     # Only list what would be converted
     [switch]$DryRun,
     # Show the Word window (debugging)
-    [switch]$Visible
+    [switch]$Visible,
+    # Turn fields inside shapes into plain text instead of only locking them. Use this if
+    # rendered images still show "Error! Reference source not found."
+    [switch]$UnlinkShapeFields
 )
 
 $ErrorActionPreference = 'Stop'
@@ -224,6 +227,7 @@ $wdInLine = 0
 $wdStyleNormal = -1
 $wdNoProtection = -1
 $msoAutomationSecurityForceDisable = 3
+$wdTextFrameStory = 5
 
 # ---------------------------------------------------------------- paths
 
@@ -260,6 +264,36 @@ function Normalize-Text([string]$t) {
     if (-not $t) { return '' }
     # Word returns '/' for an inline picture and \a for a table cell end
     (($t -replace '[\r\n\v\a\f]+', ' / ') -replace '\s+', ' ').Trim([char[]]' /')
+}
+
+# Word updates REF/PAGEREF fields while a shape is converted or rendered. The bookmark then
+# is not in scope and the field renders as "Error! Reference source not found." - which ends
+# up in the PNG. Locked fields are never updated, so the current result is kept.
+function Protect-StoryFields($story, [bool]$unlink) {
+    $count = 0
+    # backwards: Unlink() removes the field from the collection
+    for ($i = $story.Fields.Count; $i -ge 1; $i--) {
+        try {
+            $field = $story.Fields.Item($i)
+            if ($unlink) { $field.Unlink() } else { $field.Locked = $true }
+            $count++
+        } catch {}
+    }
+    return $count
+}
+
+function Protect-ShapeFields($doc, [bool]$unlink) {
+    $count = 0
+    try {
+        $story = $doc.StoryRanges.Item($wdTextFrameStory)
+    } catch {
+        return 0          # the document has no shape with text
+    }
+    while ($story) {
+        $count += Protect-StoryFields $story $unlink
+        $story = $story.NextStoryRange
+    }
+    return $count
 }
 
 # Text inside a floating shape (recurses into groups and canvases)
@@ -462,6 +496,13 @@ try {
         }
     }
     $doc.Activate()
+
+    # ---- keep the fields inside shapes as they are now (before any conversion)
+    if (-not $DryRun) {
+        try { $word.Options.UpdateFieldsAtPrint = $false } catch {}
+        $protected = Protect-ShapeFields $doc ([bool]$UnlinkShapeFields)
+        Write-Host ("Fields inside shapes {0}: {1}" -f $(if ($UnlinkShapeFields) { 'unlinked' } else { 'locked' }), $protected)
+    }
 
     # ---- pass 1: floating shapes (main story)
     $floating = @()

@@ -66,6 +66,7 @@ khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
 | Khung đỏ của người review làm hình bị tách, sinh ảnh khung đỏ | Quy tắc cleanup `ReviewerBoxes` |
 | Hình và bảng bị đóng trong bảng 1 ô (grid table) | Quy tắc cleanup `UnwrapLayoutTables` |
 | Alt text và title làm vỡ cú pháp ảnh (`\|`, ngắt dòng, `shape2png`) | `pandoc\figures.lua` + `--wrap=none` |
+| Ảnh render ra `Error! Reference source not found.` thay cho tham chiếu chéo trong hình (ví dụ "refer to 7.5"). Nguyên nhân: Word cập nhật field khi chuyển/render shape, lúc đó không thấy bookmark | Bước convert khóa field trong shape (`wdTextFrameStory`) trước khi chuyển đổi, và tắt `UpdateFieldsAtPrint`. Dự phòng: `-UnlinkShapeFields` |
 | Mất số caption và nhãn "Table", mất tham chiếu chéo (trước là B-01). Nguyên nhân: 149 field `w:fldSimple` có sẵn trong tài liệu gốc (75 STYLEREF, 74 SEQ); pandoc bỏ chữ của `fldSimple` | Bước prep, quy tắc `ExpandSimpleFields` (`profiles\pandoc.json`): chuyển về dạng field đầy đủ |
 | Caption bảng bị đưa xuống dưới bảng (bảng pipe của GFM không có caption) | `figures.lua`: caption thành đoạn văn phía trên bảng |
 | Markdown đúng nhưng không hiển thị được (grid table, `{…}`, `: caption`). Trước là D-01 | Xuất `gfm`: bảng đơn giản thành bảng pipe, bảng phức tạp và hình thành HTML. Bookmark của caption bảng (trước là B-02) thành `id` HTML hợp lệ |

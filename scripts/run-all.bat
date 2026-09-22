@@ -9,6 +9,7 @@ rem          -NoCleanup               skip data cleanup
 rem          -NoPandocPrep            skip the pandoc compatibility fixes (profiles\pandoc.json)
 rem          -NoFigureFilter          run pandoc without pandoc\figures.lua
 rem          -OutputFormat markdown   Pandoc Markdown instead of gfm (default)
+rem          -UnlinkShapeFields       fields in shapes to plain text (if images show "Error! Reference source...")
 rem          -Dpi 300 -IncludeTextBoxes -KeepMetafiles -NoCluster -NoTrim -Visible
 rem Output next to input.docx: input.clean.docx, input.shapes.docx, input.pandoc.docx, input.md, images\,
 rem          input.cleanup-manifest.csv, input.shapes\manifest.csv, input.pandoc-manifest.csv, input.pipeline.log
@@ -40,7 +41,7 @@ echo [ERROR] File not found: "%~f1"
 goto fail
 
 :usage
-echo Usage: %~nx0 input.docx [-Profile ns] [-CleanupMode Report] [-NoCleanup] [-NoPandocPrep] [-NoFigureFilter] [-OutputFormat markdown] [-Dpi 300] [-IncludeTextBoxes] [-KeepMetafiles] [-NoCluster] [-NoTrim] [-Visible]
+echo Usage: %~nx0 input.docx [-Profile ns] [-CleanupMode Report] [-NoCleanup] [-NoPandocPrep] [-NoFigureFilter] [-OutputFormat markdown] [-Dpi 300] [-IncludeTextBoxes] [-KeepMetafiles] [-NoCluster] [-NoTrim] [-Visible] [-UnlinkShapeFields]
 :fail
 if not defined NOPAUSE pause
 exit /b 1
