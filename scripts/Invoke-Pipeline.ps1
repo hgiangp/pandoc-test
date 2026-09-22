@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  docx -> markdown pipeline: preflight -> data cleanup -> shapes to PNG -> pandoc -> gate.
+  docx -> markdown pipeline: preflight -> data cleanup -> shapes to PNG -> pandoc prep -> pandoc -> gate.
 
 .DESCRIPTION
   Each stage reads a .docx and writes a new one; every intermediate file is kept next to
@@ -10,13 +10,17 @@
     input.cleanup-manifest.csv       what the cleanup rules found / removed
     input.shapes.docx                after rasterizing drawings
     input.shapes\                    rendered PNG/EMF + manifest.csv
+    input.pandoc.docx                after pandoc compatibility fixes (profiles\pandoc.json)
+    input.pandoc-manifest.csv        what those fixes changed
     input.md, images\media\          pandoc output
     input.pipeline.log               transcript of this run
 
   Data cleanup is controlled by a profile in profiles\<name>.json. The default profile
-  enables no rule, so the stage is skipped (and uv/Python are not needed). The cleanup
-  package is a uv project (cleanup\pyproject.toml + uv.lock); uv installs the pinned
-  Python and dependencies on first use.
+  enables no rule, so the stage is skipped. The pandoc prep stage always runs (unless
+  -NoPandocPrep): it applies profiles\pandoc.json, fixes for pandoc limitations that
+  every document needs (e.g. w:fldSimple fields whose text pandoc drops). Both stages use
+  the cleanup package, a uv project (cleanup\pyproject.toml + uv.lock); uv installs the
+  pinned Python and dependencies on first use.
 
   Exit code: 0 = pass, 3 = finished with issues (see output), 1 = error.
 
@@ -34,6 +38,8 @@ param(
     [switch]$NoCleanup,
     # Override the mode of every enabled rule: Report = only list findings, Apply = modify
     [ValidateSet('', 'Report', 'Apply')][string]$CleanupMode = '',
+    # Skip the pandoc compatibility fixes (for comparison); then uv is not needed without cleanup
+    [switch]$NoPandocPrep,
     # Run pandoc without pandoc\figures.lua (for comparison)
     [switch]$NoFigureFilter,
     # gfm: renders on GitHub/VS Code, complex tables and figures as HTML (default)
@@ -55,6 +61,8 @@ $cleanDocx = Join-Path $workDir "$name.clean.docx"
 $cleanManifest = Join-Path $workDir "$name.cleanup-manifest.csv"
 $shapesDocx = Join-Path $workDir "$name.shapes.docx"
 $shapesDir = Join-Path $workDir "$name.shapes"
+$prepDocx = Join-Path $workDir "$name.pandoc.docx"
+$prepManifest = Join-Path $workDir "$name.pandoc-manifest.csv"
 $mdName = "$name.md"
 $logPath = Join-Path $workDir "$name.pipeline.log"
 
@@ -73,6 +81,17 @@ function Invoke-Script([string]$path, [hashtable]$arguments) {
         return 1
     }
     return [int]$global:LASTEXITCODE
+}
+
+# Runs the cleanup package (docx in -> docx out) with a profile; throws on failure
+function Invoke-DocxCleanup([string]$in, [string]$out, [string]$profileName, [string]$manifest, [string]$mode) {
+    # --locked: fail instead of silently re-resolving if uv.lock is out of date
+    # --no-dev: do not install test tools on the processing machine
+    $uvArgs = @('run', '--project', (Join-Path $PSScriptRoot 'cleanup'), '--locked', '--no-dev',
+                'docx-cleanup', $in, '-o', $out, '--profile', $profileName, '--manifest', $manifest)
+    if ($mode) { $uvArgs += @('--mode', $mode) }
+    & uv @uvArgs | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "docx-cleanup ($profileName) failed with exit code $LASTEXITCODE." }
 }
 
 function Test-CleanupEnabled([string]$profileName) {
@@ -96,36 +115,29 @@ try {
         throw 'pandoc not found in PATH. Install: winget install --id JohnMacFarlane.Pandoc'
     }
 
-    # ---- decide cleanup before doing any work, so a missing uv fails fast
+    # ---- decide which uv stages run before doing any work, so a missing uv fails fast
     $runCleanup = (-not $NoCleanup) -and (Test-CleanupEnabled $CleanupProfile)
-    if ($runCleanup -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
-        throw 'uv not found in PATH. Install: winget install --id astral-sh.uv -e  (or run with -NoCleanup)'
+    $runPrep = -not $NoPandocPrep
+    if (($runCleanup -or $runPrep) -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
+        throw 'uv not found in PATH. Install: winget install --id astral-sh.uv -e  (or run with -NoCleanup -NoPandocPrep)'
     }
 
     # ---- 1. preflight
-    Write-Stage '[1/5] Preflight: drawings pandoc would drop'
+    Write-Stage '[1/6] Preflight: drawings pandoc would drop'
     Invoke-Script "$PSScriptRoot\Test-DocxDrawings.ps1" @{ Docx = $InputPath } | Out-Null
 
     # ---- 2. data cleanup
-    Write-Stage '[2/5] Data cleanup'
+    Write-Stage '[2/6] Data cleanup'
     $convertInput = $InputPath
     if (-not $runCleanup) {
         Write-Host "Skipped ($(if ($NoCleanup) { '-NoCleanup' } else { "no rule enabled in profile '$CleanupProfile'" }))."
     } else {
-        # --locked: fail instead of silently re-resolving if uv.lock is out of date
-        # --no-dev: do not install test tools on the processing machine
-        $uvArgs = @('run', '--project', (Join-Path $PSScriptRoot 'cleanup'), '--locked', '--no-dev',
-                    'docx-cleanup', $InputPath, '-o', $cleanDocx, '--profile', $CleanupProfile,
-                    '--manifest', $cleanManifest)
-        if ($CleanupMode) { $uvArgs += @('--mode', $CleanupMode) }
-        & uv @uvArgs | Out-Host
-        $rc = $LASTEXITCODE
-        if ($rc -ne 0) { throw "Data cleanup failed with exit code $rc." }
+        Invoke-DocxCleanup $InputPath $cleanDocx $CleanupProfile $cleanManifest $CleanupMode
         $convertInput = $cleanDocx
     }
 
     # ---- 3. drawings -> PNG
-    Write-Stage '[3/5] Convert drawings to PNG with Word'
+    Write-Stage '[3/6] Convert drawings to PNG with Word'
     $convArgs = @{
         InputPath = $convertInput; OutputPath = $shapesDocx; ImageDir = $shapesDir; Dpi = $Dpi
         IncludeTextBoxes = $IncludeTextBoxes; KeepMetafiles = $KeepMetafiles
@@ -136,24 +148,34 @@ try {
     elseif ($convertRc -ne 0) { throw "Conversion failed with exit code $convertRc." }
     if (-not (Test-Path -LiteralPath $shapesDocx)) { throw "Converted file was not created: $shapesDocx" }
 
-    # ---- 4. pandoc (inside the input folder so image links stay relative: images/media/...)
+    # ---- 4. pandoc compatibility fixes (after the last Word save, right before pandoc)
+    Write-Stage '[4/6] Prepare for pandoc'
+    $pandocInput = $shapesDocx
+    if ($runPrep) {
+        Invoke-DocxCleanup $shapesDocx $prepDocx 'pandoc' $prepManifest ''
+        $pandocInput = $prepDocx
+    } else {
+        Write-Host 'Skipped (-NoPandocPrep).'
+    }
+
+    # ---- 5. pandoc (inside the input folder so image links stay relative: images/media/...)
     #      --wrap=none: never break an image/link over several lines
     #      figures.lua: clean title/alt of converted drawings, move caption anchors to figures
-    Write-Stage '[4/5] pandoc'
+    Write-Stage '[5/6] pandoc'
     $pandocArgs = @('-f', 'docx', '-t', $OutputFormat, '--wrap=none', '--extract-media=./images')
     if (-not $NoFigureFilter) { $pandocArgs += "--lua-filter=$(Join-Path $PSScriptRoot 'pandoc\figures.lua')" }
     Write-Host ("pandoc " + ($pandocArgs -join ' '))
     Push-Location $workDir
     try {
-        & pandoc @pandocArgs $shapesDocx -o $mdName | Out-Host
+        & pandoc @pandocArgs $pandocInput -o $mdName | Out-Host
         $pandocRc = $LASTEXITCODE
     } finally { Pop-Location }
     if ($pandocRc -ne 0) { throw "pandoc failed with exit code $pandocRc." }
     Write-Host "Written: $(Join-Path $workDir $mdName)"
 
-    # ---- 5. gate
-    Write-Stage '[5/5] Gate: converted docx + markdown'
-    $gateRc = Invoke-Script "$PSScriptRoot\Test-DocxDrawings.ps1" @{ Docx = $shapesDocx; Markdown = (Join-Path $workDir $mdName) }
+    # ---- 6. gate
+    Write-Stage '[6/6] Gate: final docx + markdown'
+    $gateRc = Invoke-Script "$PSScriptRoot\Test-DocxDrawings.ps1" @{ Docx = $pandocInput; Markdown = (Join-Path $workDir $mdName) }
 
     Write-Host ''
     if ($gateRc -eq 0 -and $convertRc -eq 0) {

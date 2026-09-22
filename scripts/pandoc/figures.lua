@@ -8,8 +8,12 @@ figures.lua - tidy the images produced by Convert-ShapesToPictures.ps1 (pandoc >
   3. Figure whose caption starts with an empty bookmark span ([]{#_Ref123 .anchor}):
      the id moves to the figure, so cross references (#_Ref123) keep working and the
      caption no longer contains nested brackets, which many markdown viewers mis-render.
+  4. GFM/CommonMark output only: a table caption becomes a paragraph ABOVE the table.
+     GFM pipe tables have no caption syntax, so pandoc would print the caption below the
+     table; HTML tables would keep it in <caption>. Moving it out gives one consistent
+     form, in the same order as in Word, and keeps the bookmark span (link target).
 
-Usage: pandoc -f docx -t markdown --lua-filter=figures.lua input.docx -o output.md
+Usage: pandoc -f docx -t gfm --wrap=none --lua-filter=figures.lua input.docx -o output.md
 ]]
 
 local ALT_PREFIX = "Drawing converted to image. Text: "
@@ -64,4 +68,25 @@ function Figure(fig)
   end
   fig.identifier = anchor
   return fig
+end
+
+function Table(tbl)
+  if not (FORMAT:match("gfm") or FORMAT:match("commonmark")) then
+    return nil
+  end
+  local caption = tbl.caption.long
+  if #caption == 0 then
+    return nil
+  end
+  local out = {}
+  for _, block in ipairs(caption) do
+    -- a caption holds Plain blocks; make them real paragraphs
+    if block.t == "Plain" then
+      block = pandoc.Para(block.content)
+    end
+    table.insert(out, block)
+  end
+  tbl.caption.long = pandoc.Blocks({})
+  table.insert(out, tbl)
+  return out
 end

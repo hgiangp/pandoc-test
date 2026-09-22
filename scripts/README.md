@@ -15,12 +15,15 @@ input.docx
  ├─[2] cleanup     cleanup\ (Python)            làm sạch dữ liệu theo profile, bật/tắt được → input.clean.docx
  │                   ReviewerBoxes → UnwrapLayoutTables   (profile ns)
  ├─[3] convert     Convert-ShapesToPictures.ps1 chuyển hình vẽ sang PNG bằng Word  → input.shapes.docx
- ├─[4] pandoc      -t gfm --wrap=none --lua-filter=pandoc\figures.lua             → input.md + images\
- └─[5] gate        Test-DocxDrawings.ps1        kiểm tra không còn hình nào bị mất
+ ├─[4] prep        cleanup\ + profiles\pandoc.json  vá giới hạn của pandoc, luôn bật → input.pandoc.docx
+ │                   ExpandSimpleFields
+ ├─[5] pandoc      -t gfm --wrap=none --lua-filter=pandoc\figures.lua             → input.md + images\
+ └─[6] gate        Test-DocxDrawings.ps1        kiểm tra không còn hình nào bị mất
 ```
 
-- Bước **cleanup** xử lý vấn đề riêng của **dữ liệu**. Bước **convert** vá giới hạn của
-  **pandoc**. Hai bước được tách riêng: tắt cleanup thì pipeline chạy y như trước.
+- Bước **cleanup** xử lý vấn đề riêng của **dữ liệu**, bật/tắt theo profile. Bước **convert**
+  và bước **prep** vá giới hạn của **pandoc**, áp dụng cho mọi tài liệu. Tắt cleanup thì
+  pipeline vẫn chạy bình thường với các bước còn lại.
 - Cleanup chạy trước convert, để khung đỏ không bị gom chung với hình thật, và để ảnh PNG
   được chèn ra ngoài bảng, ngay trước caption.
 - Mỗi bước ghi ra file docx mới. Mọi file trung gian đều được giữ lại để mở bằng Word kiểm
@@ -33,7 +36,8 @@ Khi gặp một trường hợp mới, chọn bước theo **bản chất** củ
 | Bản chất của vấn đề | Xử lý ở | Ví dụ |
 |---|---|---|
 | **Nhiễu cấu trúc của dữ liệu nguồn**: những thứ không phải nội dung, do cách soạn thảo hoặc review | **Cleanup** (quy tắc Python sửa XML của docx, bật/tắt theo profile) | Khung đỏ của người review, bảng 1 ô dùng để dàn trang |
-| **Giới hạn của pandoc** với một loại đối tượng Word | **Convert** (dùng Word) | Shape, canvas, SmartArt, chart, OLE, EMF |
+| **Giới hạn của pandoc**: đối tượng cần được **render** mới đọc được | **Convert** (dùng Word) | Shape, canvas, SmartArt, chart, OLE, EMF |
+| **Giới hạn của pandoc**: cấu trúc XML hợp lệ nhưng pandoc đọc sai | **Prep** (quy tắc Python trong `profiles\pandoc.json`, luôn bật, chạy sau lần lưu cuối của Word) | `w:fldSimple`: pandoc bỏ mất chữ của field |
 | **Cách trình bày đầu ra**, phụ thuộc vào ai đọc markdown | **Lua filter trong pandoc** (sửa trên AST) | Alt text, title và id của ảnh, định dạng bảng, caption của bảng |
 | Chỉnh sửa thuần văn bản trên file `.md` | Bước hậu xử lý bằng chữ, **chỉ khi thật cần** | Chuẩn hóa khoảng trắng |
 
@@ -55,7 +59,7 @@ Lý do:
 | Windows + Word desktop 2013 trở lên | convert                                            | –                                                                                   |
 | Windows PowerShell 5.1                | toàn bộ                                          | Có sẵn trên Windows                                                               |
 | pandoc                                | pandoc                                             | `winget install --id JohnMacFarlane.Pandoc`                                        |
-| [uv](https://docs.astral.sh/uv/) | cleanup (chỉ khi dùng profile có bật quy tắc) | `winget install --id astral-sh.uv -e`. **Không cần cài Python riêng**: lần chạy đầu, uv tự tải Python 3.12 (ghim trong `cleanup\.python-version`) và các thư viện đúng phiên bản trong `cleanup\uv.lock` (cần internet lần đầu) |
+| [uv](https://docs.astral.sh/uv/) | cleanup và prep (prep luôn chạy, trừ khi dùng `-NoPandocPrep`) | `winget install --id astral-sh.uv -e`. **Không cần cài Python riêng**: lần chạy đầu, uv tự tải Python 3.12 (ghim trong `cleanup\.python-version`) và các thư viện đúng phiên bản trong `cleanup\uv.lock` (cần internet lần đầu) |
 
 ## Cách chạy nhanh: dùng file .bat
 
@@ -88,7 +92,8 @@ Kết quả nằm cạnh `input.docx`:
 | `input.cleanup-manifest.csv`           | Các quy tắc làm sạch đã tìm thấy và xử lý gì   |
 | `input.shapes.docx`, `input.shapes\` | Sau bước convert: PNG, EMF và`manifest.csv`           |
 | `input.md`, `images\media\`          | Kết quả của pandoc                                      |
-| `input.pipeline.log`                   | Log toàn bộ lần chạy                                   |
+| `input.pandoc.docx`, `input.pandoc-manifest.csv` | Sau bước prep: file pandoc thực sự đọc, và danh sách những gì đã sửa |
+| `input.pipeline.log` | Log toàn bộ lần chạy |
 
 Mã thoát: `0` là PASS, `3` là chạy xong nhưng có vấn đề, `1` là lỗi. Đặt `set NOPAUSE=1`
 để chạy không dừng, ví dụ khi dùng trong CI. Logic nằm trong `Invoke-Pipeline.ps1`;
@@ -106,7 +111,9 @@ Mỗi profile là một file JSON trong `profiles\`. Trong profile, mỗi quy t�
 | `Report` | Chỉ nhận diện và ghi vào manifest, không sửa docx |
 | `Apply`  | Nhận diện và xử lý (xóa)                           |
 
-- `default.json`: mọi quy tắc `Off`. Bước cleanup được bỏ qua và không cần uv/Python.
+- `default.json`: mọi quy tắc `Off`. Bước cleanup được bỏ qua.
+- `pandoc.json`: **không phải profile làm sạch**. Đây là profile cố định của bước prep, luôn
+  được áp dụng ngay trước pandoc. Không truyền nó vào `-Profile`.
 - `ns.json`: `ReviewerBoxes` rồi `UnwrapLayoutTables`, cả hai `Apply`. **Các quy tắc chạy
   theo đúng thứ tự trong profile.** ReviewerBoxes phải chạy trước, để khung đỏ nằm trong bảng
   bọc bị xóa trước khi nội dung của bảng được đưa ra ngoài.
@@ -193,7 +200,9 @@ chiếu chéo vẫn hoạt động sau khi gỡ.
 1. Tạo `cleanup\docx_cleanup\rules\<ten_quy_tac>.py`, kế thừa `Rule` (`model.py`) và cài đặt
    `detect()` (không được sửa docx) và `apply()`.
 2. Đăng ký class trong `registry.py`.
-3. Thêm cấu hình vào profile (`profiles\ns.json`).
+3. Thêm cấu hình vào đúng profile, theo mục "Nguyên tắc: xử lý ở bước nào?":
+   `profiles\ns.json` nếu là làm sạch dữ liệu NS, `profiles\pandoc.json` nếu là vá giới hạn
+   của pandoc cho mọi tài liệu.
 4. Viết test trong `cleanup\tests\`. `conftest.py` có sẵn các hàm tạo docx mẫu (shape,
    group, canvas, VML).
 
@@ -219,10 +228,35 @@ Pipeline gọi `uv run --project cleanup --locked --no-dev docx-cleanup ...`:
 cd scripts/cleanup
 uv sync                                  # tạo .venv (có cả nhóm dev)
 uv run pytest                            # chạy test, không cần Windows
+PANDOC=/path/to/pandoc uv run pytest     # thêm test đầu cuối chạy pandoc thật (tự bỏ qua nếu không có pandoc)
 uv run --isolated --python 3.9 pytest    # kiểm tra tương thích Python 3.9
 uv add <package>                         # thêm dependency (tự cập nhật uv.lock)
 uv lock --upgrade                        # nâng phiên bản các thư viện
 ```
+
+## Bước prep: vá giới hạn của pandoc (`profiles\pandoc.json`)
+
+Bước này chạy **sau lần lưu cuối của Word** (bước convert) và ngay trước pandoc, áp dụng cho
+mọi tài liệu. Muốn tắt để so sánh thì dùng `-NoPandocPrep`. Các thay đổi được ghi vào
+`input.pandoc-manifest.csv`.
+
+### Quy tắc `ExpandSimpleFields`
+
+Word lưu một field (số caption, tham chiếu chéo…) theo một trong hai dạng: **field đầy đủ**
+(`w:fldChar` begin/separate/end) hoặc **dạng rút gọn** `w:fldSimple`. Pandoc (đã kiểm tra các
+bản 3.1–3.11) **bỏ mất chữ** của mọi `w:fldSimple`:
+
+| Trong Word | Field | Pandoc, không có prep | Pandoc, có prep |
+|---|---|---|---|
+| `Table 1‑3 Example` | `SEQ`, `STYLEREF` dạng `fldSimple` | `Example`: mất cả nhãn và số | `Table 1‑3 Example` |
+| `Fig. 4‑1 Example of` | `STYLEREF` dạng `fldSimple` | `Fig. ‑1 Example of` | `Fig. 4‑1 Example of` |
+| `shown in Table 1‑3` | `REF` dạng `fldSimple` | `shown in`: mất tham chiếu | `shown in [Table 1‑3](#_Ref…)` (pandoc 3.11; bản cũ hơn ra chữ thường) |
+
+Quy tắc chuyển mỗi `w:fldSimple` sang dạng field đầy đủ, giữ nguyên câu lệnh, kết quả và định
+dạng. Trong Word, tài liệu hiển thị y như cũ.
+
+Trong dữ liệu NS, tài liệu mẫu có sẵn 149 `fldSimple` ngay từ file gốc (75 STYLEREF, 74 SEQ),
+đều là số của caption. Không phải Word tạo ra chúng khi lưu ở bước convert.
 
 ## Bước pandoc: định dạng đầu ra và `pandoc\figures.lua`
 
@@ -260,6 +294,7 @@ Lua filter chạy trong pandoc, xử lý các ảnh do bước convert tạo ra:
 | Title `shape2png:S001` (dùng để đối chiếu với manifest) chuyển thành thuộc tính | `"shape2png:S001"` | `data-shape="S001"` |
 | Alt text chứa chữ trong hình: giữ lại cho LLM, bỏ dấu `\|` vốn gây xung đột với cú pháp bảng | `Drawing converted to image. Text: A \| B` | `Text in figure: A; B` |
 | Bookmark trong caption của figure chuyển lên figure | `<span id="_Ref1" class="anchor">` nằm trong caption | `<figure id="_Ref1">` |
+| **Caption của bảng đặt phía trên bảng** (chỉ với `gfm`). Bảng pipe không có cú pháp caption, nên pandoc đặt caption xuống dưới; bảng HTML thì lại dùng `<caption>`. Filter thống nhất một dạng, đúng thứ tự như trong Word | Caption nằm dưới bảng pipe, hoặc trong `<caption>` | Đoạn văn caption (giữ bookmark) đứng trước bảng |
 
 Khi ảnh đứng ngay trước một đoạn caption, pandoc tự ghép hai phần thành một figure.
 Kết quả với GFM:
@@ -271,12 +306,14 @@ Kết quả với GFM:
 </figure>
 ```
 
-Tương tự, caption đứng ngay trước một bảng sẽ thành `<caption>` của bảng đó. Link tham chiếu
-chéo (`[Fig. 7‑30](#_Ref240186339)`) trỏ tới `id` của figure hoặc của bảng.
+Caption của bảng là một đoạn văn ngay trước bảng, bắt đầu bằng bookmark
+`<span id="_Ref…" class="anchor"></span>`. Link tham chiếu chéo
+(`[Fig. 7‑30](#_Ref240186339)`, `[Table 1‑2](#_Ref136255150)`) trỏ tới `id` của figure hoặc
+tới bookmark của caption bảng.
 
 `--wrap=none`: không ngắt dòng giữa cú pháp ảnh hay link.
 
-Đã kiểm thử với pandoc 3.11, cả `gfm` và `markdown`. Filter cần pandoc ≥ 3.0.
+Đã kiểm thử với pandoc 3.1.11 và 3.11, cả `gfm` và `markdown`. Filter cần pandoc ≥ 3.0.
 
 ## Các bước chạy thủ công (bước convert)
 

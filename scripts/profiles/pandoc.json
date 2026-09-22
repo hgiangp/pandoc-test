@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "description": "Pandoc compatibility fixes for every document; runs right before pandoc (not a data cleanup profile).",
+  "rules": {
+    "ExpandSimpleFields": {
+      "mode": "Apply"
+    }
+  }
+}

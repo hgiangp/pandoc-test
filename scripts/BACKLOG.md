@@ -8,7 +8,7 @@ khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
 
 | ID | Ưu tiên | Vấn đề | Dữ kiện đã có | Bước tiếp theo |
 |---|---|---|---|---|
-| B-01 | P1 | **Mất số trong caption ở file `.md` cuối cùng** (`Fig. ‑ …`), có chỗ mất cả chữ "Table" | `input.shapes.docx` vẫn có đủ số (bạn đã kiểm tra), nên lỗi nằm ở bước pandoc. File mẫu có field `STYLEREF 1 \s` + `SEQ … \s 1` chạy với pandoc **3.11** vẫn ra đủ `7‑30`. Vậy nhiều khả năng do **phiên bản pandoc** trên máy test, hoặc cấu trúc field thật khác với file mẫu (field lồng nhau, `fldSimple`, instrText bị tách nhiều run, chữ "Table" nằm trong field) | Kiểm tra `pandoc --version` trên máy test. Gửi XML của một đoạn caption bị lỗi (trong `word/document.xml` của `input.shapes.docx`). Hướng xử lý có thể là chuyển field thành chữ thường ở bước cleanup (quy tắc mới) hoặc dùng "Unlink Fields" ở bước convert |
+| – | – | (không còn vấn đề đã biết nào đang mở) | | |
 
 ## Quyết định còn mở
 
@@ -46,6 +46,7 @@ khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
 | P-02 | P2 | **Giảm token**: GFM giữ lại các thuộc tính chỉ để trình bày (`style="width:…"`, `<colgroup>`, `style` của bảng). Có thể dùng filter để bỏ bớt |
 | P-03 | P2 | **Yêu cầu với RAG**: giữ thẻ HTML, không cắt chunk giữa `<table>` hoặc `<figure>`. Cần kiểm tra khi tích hợp |
 | P-04 | P3 | Bảng không có hàng tiêu đề trong Word bị xuất thành bảng HTML, dù rất đơn giản. Có thể coi hàng đầu tiên là tiêu đề khi hàng đó in đậm hoặc có tô nền |
+| P-06 | P3 | Với pandoc cũ hơn 3.11, tham chiếu `REF` ra chữ thường thay vì link. Nên thống nhất dùng pandoc ≥ 3.11 trên máy chạy |
 | P-05 | P3 | GitHub thêm tiền tố `user-content-` vào `id`, nên link tham chiếu chéo (`#_Ref…`) có thể không nhảy đúng khi xem trên GitHub. VS Code hiển thị bình thường |
 
 ### Kiểm tra & vận hành
@@ -65,5 +66,7 @@ khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
 | Khung đỏ của người review làm hình bị tách, sinh ảnh khung đỏ | Quy tắc cleanup `ReviewerBoxes` |
 | Hình và bảng bị đóng trong bảng 1 ô (grid table) | Quy tắc cleanup `UnwrapLayoutTables` |
 | Alt text và title làm vỡ cú pháp ảnh (`\|`, ngắt dòng, `shape2png`) | `pandoc\figures.lua` + `--wrap=none` |
+| Mất số caption và nhãn "Table", mất tham chiếu chéo (trước là B-01). Nguyên nhân: 149 field `w:fldSimple` có sẵn trong tài liệu gốc (75 STYLEREF, 74 SEQ); pandoc bỏ chữ của `fldSimple` | Bước prep, quy tắc `ExpandSimpleFields` (`profiles\pandoc.json`): chuyển về dạng field đầy đủ |
+| Caption bảng bị đưa xuống dưới bảng (bảng pipe của GFM không có caption) | `figures.lua`: caption thành đoạn văn phía trên bảng |
 | Markdown đúng nhưng không hiển thị được (grid table, `{…}`, `: caption`). Trước là D-01 | Xuất `gfm`: bảng đơn giản thành bảng pipe, bảng phức tạp và hình thành HTML. Bookmark của caption bảng (trước là B-02) thành `id` HTML hợp lệ |
 | Đường dẫn sai trong `.bat` sau lệnh `shift` | Lưu thư mục script trước khi `shift` |
