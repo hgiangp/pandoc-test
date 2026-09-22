@@ -12,7 +12,7 @@
     input.shapes\                    rendered PNG/EMF + manifest.csv
     input.pandoc.docx                after pandoc compatibility fixes (profiles\pandoc.json)
     input.pandoc-manifest.csv        what those fixes changed
-    input.md, images\media\          pandoc output
+    input.md, images\media\          pandoc output (EMF/WMF converted to PNG)
     input.pipeline.log               transcript of this run
 
   Data cleanup is controlled by a profile in profiles\<name>.json. The default profile
@@ -40,6 +40,8 @@ param(
     [ValidateSet('', 'Report', 'Apply')][string]$CleanupMode = '',
     # Skip the pandoc compatibility fixes (for comparison); then uv is not needed without cleanup
     [switch]$NoPandocPrep,
+    # Skip converting EMF/WMF files that pandoc extracted into PNG
+    [switch]$NoMediaConvert,
     # Run pandoc without pandoc\figures.lua (for comparison)
     [switch]$NoFigureFilter,
     # gfm: renders on GitHub/VS Code, complex tables and figures as HTML (default)
@@ -124,11 +126,11 @@ try {
     }
 
     # ---- 1. preflight
-    Write-Stage '[1/6] Preflight: drawings pandoc would drop'
+    Write-Stage '[1/7] Preflight: drawings pandoc would drop'
     Invoke-Script "$PSScriptRoot\Test-DocxDrawings.ps1" @{ Docx = $InputPath } | Out-Null
 
     # ---- 2. data cleanup
-    Write-Stage '[2/6] Data cleanup'
+    Write-Stage '[2/7] Data cleanup'
     $convertInput = $InputPath
     if (-not $runCleanup) {
         Write-Host "Skipped ($(if ($NoCleanup) { '-NoCleanup' } else { "no rule enabled in profile '$CleanupProfile'" }))."
@@ -138,7 +140,7 @@ try {
     }
 
     # ---- 3. drawings -> PNG
-    Write-Stage '[3/6] Convert drawings to PNG with Word'
+    Write-Stage '[3/7] Convert drawings to PNG with Word'
     $convArgs = @{
         InputPath = $convertInput; OutputPath = $shapesDocx; ImageDir = $shapesDir; Dpi = $Dpi
         IncludeTextBoxes = $IncludeTextBoxes; KeepMetafiles = $KeepMetafiles
@@ -151,7 +153,7 @@ try {
     if (-not (Test-Path -LiteralPath $shapesDocx)) { throw "Converted file was not created: $shapesDocx" }
 
     # ---- 4. pandoc compatibility fixes (after the last Word save, right before pandoc)
-    Write-Stage '[4/6] Prepare for pandoc'
+    Write-Stage '[4/7] Prepare for pandoc'
     $pandocInput = $shapesDocx
     if ($runPrep) {
         Invoke-DocxCleanup $shapesDocx $prepDocx 'pandoc' $prepManifest ''
@@ -163,7 +165,7 @@ try {
     # ---- 5. pandoc (inside the input folder so image links stay relative: images/media/...)
     #      --wrap=none: never break an image/link over several lines
     #      figures.lua: clean title/alt of converted drawings, move caption anchors to figures
-    Write-Stage '[5/6] pandoc'
+    Write-Stage '[5/7] pandoc'
     $pandocArgs = @('-f', 'docx', '-t', $OutputFormat, '--wrap=none', '--extract-media=./images')
     if (-not $NoFigureFilter) { $pandocArgs += "--lua-filter=$(Join-Path $PSScriptRoot 'pandoc\figures.lua')" }
     Write-Host ("pandoc " + ($pandocArgs -join ' '))
@@ -175,8 +177,19 @@ try {
     if ($pandocRc -ne 0) { throw "pandoc failed with exit code $pandocRc." }
     Write-Host "Written: $(Join-Path $workDir $mdName)"
 
-    # ---- 6. gate
-    Write-Stage '[6/6] Gate: final docx + markdown'
+    # ---- 6. EMF/WMF that reached the output (floating metafile pictures, -KeepMetafiles, ...)
+    Write-Stage '[6/7] Convert extracted EMF/WMF to PNG'
+    if ($NoMediaConvert) {
+        Write-Host 'Skipped (-NoMediaConvert).'
+    } else {
+        $mediaRc = Invoke-Script "$PSScriptRoot\Convert-MediaToPng.ps1" @{
+            Markdown = (Join-Path $workDir $mdName); MediaDir = (Join-Path $workDir 'images'); Dpi = $Dpi
+        }
+        if ($mediaRc -ne 0) { Write-Warning 'Some EMF/WMF files could not be converted.' }
+    }
+
+    # ---- 7. gate
+    Write-Stage '[7/7] Gate: final docx + markdown'
     $gateRc = Invoke-Script "$PSScriptRoot\Test-DocxDrawings.ps1" @{ Docx = $pandocInput; Markdown = (Join-Path $workDir $mdName) }
 
     Write-Host ''

@@ -33,7 +33,6 @@ khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
 | ID | Ưu tiên | Nội dung |
 |---|---|---|
 | V-01 | P2 | Chưa xử lý shape trong header, footer, footnote, comment |
-| V-02 | P2 | Ảnh EMF/WMF dạng **floating** chưa được chuyển sang PNG |
 | V-03 | P2 | Gom shape rời thành một hình dựa vào caption: hình không có caption và neo ở nhiều paragraph có thể bị tách. Caption nằm trong text box floating có thể bị render vào ảnh |
 | V-04 | P3 | Đang dùng lại dấu phân cách ` \| ` trong alt text (`Build-AltText`), và `figures.lua` dựa vào dấu này để chuyển thành `; `. Nếu chạy không có filter thì `\|` vẫn xuất hiện |
 | V-05 | P3 | Hiệu năng: mở và đóng Word một lần cho cả lô tài liệu, thay vì mỗi file một lần |
@@ -66,6 +65,7 @@ khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
 | Khung đỏ của người review làm hình bị tách, sinh ảnh khung đỏ | Quy tắc cleanup `ReviewerBoxes` |
 | Hình và bảng bị đóng trong bảng 1 ô (grid table) | Quy tắc cleanup `UnwrapLayoutTables` |
 | Alt text và title làm vỡ cú pháp ảnh (`\|`, ngắt dòng, `shape2png`) | `pandoc\figures.lua` + `--wrap=none` |
+| Ảnh EMF/WMF lọt ra markdown và không hiển thị được, ví dụ ảnh floating (trước là V-02) | Bước media `Convert-MediaToPng.ps1`: render sang PNG và sửa link |
 | Ảnh render ra `Error! Reference source not found.` thay cho tham chiếu chéo trong hình (ví dụ "refer to 7.5"). Nguyên nhân: Word cập nhật field khi chuyển/render shape, lúc đó không thấy bookmark | Bước convert khóa field trong shape (`wdTextFrameStory`) trước khi chuyển đổi, và tắt `UpdateFieldsAtPrint`. Dự phòng: `-UnlinkShapeFields` |
 | Mất số caption và nhãn "Table", mất tham chiếu chéo (trước là B-01). Nguyên nhân: 149 field `w:fldSimple` có sẵn trong tài liệu gốc (75 STYLEREF, 74 SEQ); pandoc bỏ chữ của `fldSimple` | Bước prep, quy tắc `ExpandSimpleFields` (`profiles\pandoc.json`): chuyển về dạng field đầy đủ |
 | Caption bảng bị đưa xuống dưới bảng (bảng pipe của GFM không có caption) | `figures.lua`: caption thành đoạn văn phía trên bảng |

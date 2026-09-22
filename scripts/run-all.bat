@@ -1,5 +1,5 @@
 @echo off
-rem Full pipeline: preflight -> data cleanup -> drawings to PNG -> pandoc prep -> pandoc -> gate.
+rem Full pipeline: preflight -> cleanup -> drawings to PNG -> pandoc prep -> pandoc -> media -> gate.
 rem All logic lives in Invoke-Pipeline.ps1; this file only makes it easy to launch.
 rem
 rem Usage:   run-all.bat input.docx [options]
@@ -8,6 +8,7 @@ rem          -CleanupMode Report      cleanup only reports, changes nothing
 rem          -NoCleanup               skip data cleanup
 rem          -NoPandocPrep            skip the pandoc compatibility fixes (profiles\pandoc.json)
 rem          -NoFigureFilter          run pandoc without pandoc\figures.lua
+rem          -NoMediaConvert          keep extracted EMF/WMF instead of converting them to PNG
 rem          -OutputFormat markdown   Pandoc Markdown instead of gfm (default)
 rem          -UnlinkShapeFields       fields in shapes to plain text (if images show "Error! Reference source...")
 rem          -Dpi 300 -IncludeTextBoxes -KeepMetafiles -NoCluster -NoTrim -Visible
@@ -41,7 +42,7 @@ echo [ERROR] File not found: "%~f1"
 goto fail
 
 :usage
-echo Usage: %~nx0 input.docx [-Profile ns] [-CleanupMode Report] [-NoCleanup] [-NoPandocPrep] [-NoFigureFilter] [-OutputFormat markdown] [-Dpi 300] [-IncludeTextBoxes] [-KeepMetafiles] [-NoCluster] [-NoTrim] [-Visible] [-UnlinkShapeFields]
+echo Usage: %~nx0 input.docx [-Profile ns] [-CleanupMode Report] [-NoCleanup] [-NoPandocPrep] [-NoFigureFilter] [-NoMediaConvert] [-OutputFormat markdown] [-Dpi 300] [-IncludeTextBoxes] [-KeepMetafiles] [-NoCluster] [-NoTrim] [-Visible] [-UnlinkShapeFields]
 :fail
 if not defined NOPAUSE pause
 exit /b 1

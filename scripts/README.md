@@ -18,7 +18,8 @@ input.docx
  ├─[4] prep        cleanup\ + profiles\pandoc.json  vá giới hạn của pandoc, luôn bật → input.pandoc.docx
  │                   ExpandSimpleFields
  ├─[5] pandoc      -t gfm --wrap=none --lua-filter=pandoc\figures.lua             → input.md + images\
- └─[6] gate        Test-DocxDrawings.ps1        kiểm tra không còn hình nào bị mất
+ ├─[6] media       Convert-MediaToPng.ps1       chuyển EMF/WMF còn sót sang PNG, sửa link
+ └─[7] gate        Test-DocxDrawings.ps1        kiểm tra không còn hình nào bị mất
 ```
 
 - Bước **cleanup** xử lý vấn đề riêng của **dữ liệu**, bật/tắt theo profile. Bước **convert**
@@ -91,7 +92,7 @@ Kết quả nằm cạnh `input.docx`:
 | `input.clean.docx`                     | Sau bước làm sạch (chỉ có khi profile bật quy tắc) |
 | `input.cleanup-manifest.csv`           | Các quy tắc làm sạch đã tìm thấy và xử lý gì   |
 | `input.shapes.docx`, `input.shapes\` | Sau bước convert: PNG, EMF và`manifest.csv`           |
-| `input.md`, `images\media\`          | Kết quả của pandoc                                      |
+| `input.md`, `images\media\` | Kết quả của pandoc. Mọi ảnh EMF/WMF đã được chuyển sang PNG |
 | `input.pandoc.docx`, `input.pandoc-manifest.csv` | Sau bước prep: file pandoc thực sự đọc, và danh sách những gì đã sửa |
 | `input.pipeline.log` | Log toàn bộ lần chạy |
 
@@ -257,6 +258,20 @@ dạng. Trong Word, tài liệu hiển thị y như cũ.
 
 Trong dữ liệu NS, tài liệu mẫu có sẵn 149 `fldSimple` ngay từ file gốc (75 STYLEREF, 74 SEQ),
 đều là số của caption. Không phải Word tạo ra chúng khi lưu ở bước convert.
+
+## Bước media: `Convert-MediaToPng.ps1`
+
+Trình xem markdown và trình duyệt không hiển thị được EMF/WMF. Phần lớn ảnh dạng này đã được
+bước convert chuyển sang PNG (ảnh inline, đối tượng OLE, ảnh nằm trong group/canvas), nhưng
+vẫn có trường hợp lọt ra: **ảnh EMF/WMF dạng floating**, hoặc khi chạy với `-KeepMetafiles`.
+
+Bước này là lớp chặn cuối: quét `images\`, render mọi file `.emf`/`.wmf` sang PNG bằng GDI+
+(cùng bộ render với bước convert, `lib\ShapeRaster.cs`), rồi sửa **đúng tên file** trong
+markdown, không đụng tới phần chữ nào khác. File gốc được giữ lại, trừ khi dùng
+`-RemoveOriginals`. Tắt bước này bằng `-NoMediaConvert`.
+
+Ảnh ở đây không bị cắt viền trắng, khác với hình vẽ, vì lề của một tấm ảnh có thể là phần
+nội dung.
 
 ## Bước pandoc: định dạng đầu ra và `pandoc\figures.lua`
 
