@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "description": "No data cleanup: every rule is off. The pipeline behaves as without the cleanup stage.",
+  "rules": {
+    "ReviewerBoxes": { "mode": "Off" }
+  }
+}

@@ -1,0 +1,29 @@
+[project]
+name = "docx-cleanup"
+version = "0.1.0"
+description = "Data cleanup stage of the docx -> markdown pipeline (rule-based, profile driven)"
+requires-python = ">=3.9"
+dependencies = [
+    "lxml>=4.9",
+]
+
+[project.scripts]
+docx-cleanup = "docx_cleanup.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=7",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# flat layout: the package lives in ./docx_cleanup, not ./src/docx_cleanup
+module-name = "docx_cleanup"
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"

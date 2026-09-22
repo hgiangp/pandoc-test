@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "description": "Customer NS: reviewers drew red rounded rectangles around content to highlight it.",
+  "rules": {
+    "ReviewerBoxes": {
+      "mode": "Apply",
+      "colors": ["FF0000", "C00000", "E60012"],
+      "colorTolerance": 60,
+      "matchRedHue": true,
+      "geometries": ["rect", "roundRect"],
+      "maxFillOpacity": 0.1,
+      "includeInGroups": false
+    }
+  }
+}
