@@ -1,19 +1,29 @@
 <#
 .SYNOPSIS
-  docx -> markdown pipeline: preflight -> data cleanup -> shapes to PNG -> pandoc prep -> pandoc -> gate.
+  docx -> markdown pipeline: preflight -> data cleanup -> shapes to PNG -> pandoc prep -> pandoc -> publish -> gate.
 
 .DESCRIPTION
-  Each stage reads a .docx and writes a new one; every intermediate file is kept next to
-  the input so it can be opened in Word:
+  The deliverable goes to its own folder next to the input (-OutputDir), rebuilt on every run:
 
-    input.clean.docx                 after data cleanup (only when the profile enables a rule)
-    input.cleanup-manifest.csv       what the cleanup rules found / removed
-    input.shapes.docx                after rasterizing drawings
-    input.shapes\                    rendered PNG/EMF + manifest.csv
-    input.pandoc.docx                after pandoc compatibility fixes (profiles\pandoc.json)
-    input.pandoc-manifest.csv        what those fixes changed
-    input.md, images\media\          pandoc output (EMF/WMF converted to PNG)
-    input.pipeline.log               transcript of this run
+    input.out\input.md               final markdown
+    input.out\images\                only the images it links (PNG), links "images/<file>"
+
+  Each stage reads a .docx and writes a new one; every intermediate file is kept in the work
+  folder (-WorkDir) so it can be opened in Word:
+
+    input.work\input.clean.docx                after data cleanup (only when the profile enables a rule)
+    input.work\input.cleanup-manifest.csv      what the cleanup rules found / removed
+    input.work\input.shapes.docx               after rasterizing drawings
+    input.work\input.shapes\                   rendered PNG/EMF + manifest.csv
+    input.work\input.pandoc.docx               after pandoc compatibility fixes (profiles\pandoc.json)
+    input.work\input.pandoc-manifest.csv       what those fixes changed
+    input.work\input.md, images\media\         raw pandoc output (EMF/WMF converted to PNG)
+    input.work\input.pipeline.log              transcript of this run
+
+  The rendered drawings in input.shapes\ are embedded in input.shapes.docx, so pandoc
+  extracts them into images\media\ like any other picture; the output needs no copy of them.
+  File names inside the work folder keep the input name: Word cannot open two documents
+  with the same name at once.
 
   Data cleanup is controlled by a profile in profiles\<name>.json. The default profile
   enables no rule, so the stage is skipped. The pandoc prep stage always runs (unless
@@ -47,6 +57,10 @@ param(
     # gfm: renders on GitHub/VS Code, complex tables and figures as HTML (default)
     # markdown: Pandoc Markdown (grid tables, {attributes}), only pandoc-aware tools render it
     [ValidateSet('gfm', 'markdown')][string]$OutputFormat = 'gfm',
+    # Final markdown + images; default: <input folder>\<name>.out (replaced on every run)
+    [string]$OutputDir,
+    # Intermediate files; default: <input folder>\<name>.work
+    [string]$WorkDir,
     # Passed through to Convert-ShapesToPictures.ps1
     [int]$Dpi = 200,
     [switch]$IncludeTextBoxes,
@@ -60,8 +74,19 @@ param(
 )
 
 $InputPath = (Resolve-Path -LiteralPath $InputPath).Path
-$workDir = Split-Path $InputPath -Parent
+$inputDir = Split-Path $InputPath -Parent
 $name = [IO.Path]::GetFileNameWithoutExtension($InputPath)
+function Resolve-FullPath([string]$p) {
+    $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($p).TrimEnd('\', '/')
+}
+$workDir = if ($WorkDir) { Resolve-FullPath $WorkDir } else { Join-Path $inputDir "$name.work" }
+$outDir = if ($OutputDir) { Resolve-FullPath $OutputDir } else { Join-Path $inputDir "$name.out" }
+# the pandoc stage deletes images\ in the work folder, so it must not be a folder of the user's
+if ($workDir -ieq $inputDir.TrimEnd('\', '/')) {
+    Write-Host "[ERROR] WorkDir must differ from the input folder: $workDir" -ForegroundColor Red
+    exit 1
+}
+New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 $cleanDocx = Join-Path $workDir "$name.clean.docx"
 $cleanManifest = Join-Path $workDir "$name.cleanup-manifest.csv"
 $shapesDocx = Join-Path $workDir "$name.shapes.docx"
@@ -69,6 +94,7 @@ $shapesDir = Join-Path $workDir "$name.shapes"
 $prepDocx = Join-Path $workDir "$name.pandoc.docx"
 $prepManifest = Join-Path $workDir "$name.pandoc-manifest.csv"
 $mdName = "$name.md"
+$mediaDir = Join-Path $workDir 'images'
 $logPath = Join-Path $workDir "$name.pipeline.log"
 
 function Write-Stage([string]$text) {
@@ -114,6 +140,8 @@ $exitCode = 1
 try { Start-Transcript -Path $logPath -Force | Out-Null } catch {}
 try {
     Write-Host "Input:   $InputPath"
+    Write-Host "Work:    $workDir"
+    Write-Host "Output:  $outDir"
     Write-Host "Profile: $(if ($NoCleanup) { '(cleanup disabled)' } else { $CleanupProfile })"
 
     if (-not (Get-Command pandoc -ErrorAction SilentlyContinue)) {
@@ -128,11 +156,11 @@ try {
     }
 
     # ---- 1. preflight
-    Write-Stage '[1/7] Preflight: drawings pandoc would drop'
+    Write-Stage '[1/8] Preflight: drawings pandoc would drop'
     Invoke-Script "$PSScriptRoot\Test-DocxDrawings.ps1" @{ Docx = $InputPath } | Out-Null
 
     # ---- 2. data cleanup
-    Write-Stage '[2/7] Data cleanup'
+    Write-Stage '[2/8] Data cleanup'
     $convertInput = $InputPath
     if (-not $runCleanup) {
         Write-Host "Skipped ($(if ($NoCleanup) { '-NoCleanup' } else { "no rule enabled in profile '$CleanupProfile'" }))."
@@ -142,7 +170,7 @@ try {
     }
 
     # ---- 3. drawings -> PNG
-    Write-Stage '[3/7] Convert drawings to PNG with Word'
+    Write-Stage '[3/8] Convert drawings to PNG with Word'
     $convArgs = @{
         InputPath = $convertInput; OutputPath = $shapesDocx; ImageDir = $shapesDir; Dpi = $Dpi
         IncludeTextBoxes = $IncludeTextBoxes; KeepMetafiles = $KeepMetafiles
@@ -155,7 +183,7 @@ try {
     if (-not (Test-Path -LiteralPath $shapesDocx)) { throw "Converted file was not created: $shapesDocx" }
 
     # ---- 4. pandoc compatibility fixes (after the last Word save, right before pandoc)
-    Write-Stage '[4/7] Prepare for pandoc'
+    Write-Stage '[4/8] Prepare for pandoc'
     $pandocInput = $shapesDocx
     if ($runPrep) {
         Invoke-DocxCleanup $shapesDocx $prepDocx 'pandoc' $prepManifest ''
@@ -164,13 +192,15 @@ try {
         Write-Host 'Skipped (-NoPandocPrep).'
     }
 
-    # ---- 5. pandoc (inside the input folder so image links stay relative: images/media/...)
+    # ---- 5. pandoc (inside the work folder so image links stay relative: images/media/...)
     #      --wrap=none: never break an image/link over several lines
     #      figures.lua: clean title/alt of converted drawings, move caption anchors to figures
-    Write-Stage '[5/7] pandoc'
+    Write-Stage '[5/8] pandoc'
     $pandocArgs = @('-f', 'docx', '-t', $OutputFormat, '--wrap=none', '--extract-media=./images')
     if (-not $NoFigureFilter) { $pandocArgs += "--lua-filter=$(Join-Path $PSScriptRoot 'pandoc\figures.lua')" }
     Write-Host ("pandoc " + ($pandocArgs -join ' '))
+    # media from an earlier run would otherwise stay and be converted again in step 6
+    if (Test-Path -LiteralPath $mediaDir) { Remove-Item -LiteralPath $mediaDir -Recurse -Force }
     Push-Location $workDir
     try {
         & pandoc @pandocArgs $pandocInput -o $mdName | Out-Host
@@ -180,26 +210,35 @@ try {
     Write-Host "Written: $(Join-Path $workDir $mdName)"
 
     # ---- 6. EMF/WMF that reached the output (floating metafile pictures, -KeepMetafiles, ...)
-    Write-Stage '[6/7] Convert extracted EMF/WMF to PNG'
+    Write-Stage '[6/8] Convert extracted EMF/WMF to PNG'
     if ($NoMediaConvert) {
         Write-Host 'Skipped (-NoMediaConvert).'
     } else {
         $mediaRc = Invoke-Script "$PSScriptRoot\Convert-MediaToPng.ps1" @{
-            Markdown = (Join-Path $workDir $mdName); MediaDir = (Join-Path $workDir 'images'); Dpi = $Dpi
+            Markdown = (Join-Path $workDir $mdName); MediaDir = $mediaDir; Dpi = $Dpi
         }
         if ($mediaRc -ne 0) { Write-Warning 'Some EMF/WMF files could not be converted.' }
     }
 
-    # ---- 7. gate
-    Write-Stage '[7/7] Gate: final docx + markdown'
-    $gateRc = Invoke-Script "$PSScriptRoot\Test-DocxDrawings.ps1" @{ Docx = $pandocInput; Markdown = (Join-Path $workDir $mdName) }
+    # ---- 7. output folder: the markdown + only the images it links
+    Write-Stage '[7/8] Publish output'
+    $publishRc = Invoke-Script "$PSScriptRoot\Publish-Output.ps1" @{
+        Markdown = (Join-Path $workDir $mdName); OutputDir = $outDir; MediaDir = $mediaDir
+    }
+    if ($publishRc -eq 1) { throw "Publishing to $outDir failed." }
+    $outMd = Join-Path $outDir $mdName
+
+    # ---- 8. gate (on the published markdown: what the reader gets)
+    Write-Stage '[8/8] Gate: final docx + markdown'
+    $gateRc = Invoke-Script "$PSScriptRoot\Test-DocxDrawings.ps1" @{ Docx = $pandocInput; Markdown = $outMd }
 
     Write-Host ''
-    if ($gateRc -eq 0 -and $convertRc -eq 0) {
+    Write-Host "Result: $outMd"
+    if ($gateRc -eq 0 -and $convertRc -eq 0 -and $publishRc -eq 0) {
         Write-Host '[PASS] All drawings converted, no drawing objects left for pandoc to drop.' -ForegroundColor Green
         $exitCode = 0
     } else {
-        Write-Host "[CHECK] Finished with issues: convert=$convertRc, gate=$gateRc. Review the output above and the manifests." -ForegroundColor Yellow
+        Write-Host "[CHECK] Finished with issues: convert=$convertRc, publish=$publishRc, gate=$gateRc. Review the output above and the manifests." -ForegroundColor Yellow
         $exitCode = 3
     }
 } catch {

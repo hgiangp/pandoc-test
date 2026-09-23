@@ -19,7 +19,8 @@ input.docx
  │                   ExpandSimpleFields
  ├─[5] pandoc      -t gfm --wrap=none --lua-filter=pandoc\figures.lua             → input.md + images\
  ├─[6] media       Convert-MediaToPng.ps1       chuyển EMF/WMF còn sót sang PNG, sửa link
- └─[7] gate        Test-DocxDrawings.ps1        kiểm tra không còn hình nào bị mất
+ ├─[7] publish     Publish-Output.ps1           md + chỉ các ảnh md dùng → input.out\
+ └─[8] gate        Test-DocxDrawings.ps1        kiểm tra không còn hình nào bị mất
 ```
 
 - Bước **cleanup** xử lý vấn đề riêng của **dữ liệu**, bật/tắt theo profile. Bước **convert**
@@ -27,8 +28,9 @@ input.docx
   pipeline vẫn chạy bình thường với các bước còn lại.
 - Cleanup chạy trước convert, để khung đỏ không bị gom chung với hình thật, và để ảnh PNG
   được chèn ra ngoài bảng, ngay trước caption.
-- Mỗi bước ghi ra file docx mới. Mọi file trung gian đều được giữ lại để mở bằng Word kiểm
-  tra. File gốc không bao giờ bị sửa.
+- Mỗi bước ghi ra file docx mới. Mọi file trung gian đều được giữ lại trong `input.work\` để
+  mở bằng Word kiểm tra. File gốc không bao giờ bị sửa.
+- Kết quả bàn giao nằm riêng trong `input.out\`: chỉ có file md và các ảnh md tham chiếu.
 
 ### Nguyên tắc: xử lý ở bước nào?
 
@@ -85,16 +87,31 @@ run-all.bat input.docx -NoCleanup
 run-all.bat input.docx -Profile ns -NoFigureFilter
 ```
 
-Kết quả nằm cạnh `input.docx`:
+Kết quả nằm trong hai thư mục cạnh `input.docx`:
 
-| File                                     | Nội dung                                                  |
+```
+input.out\          kết quả bàn giao, được tạo lại sau mỗi lần chạy
+  input.md
+  images\           chỉ các ảnh md tham chiếu (PNG), link dạng images/image19.png
+input.work\         file trung gian để kiểm tra
+```
+
+| File trong `input.work\`                 | Nội dung                                                  |
 | ---------------------------------------- | ---------------------------------------------------------- |
 | `input.clean.docx`                     | Sau bước làm sạch (chỉ có khi profile bật quy tắc) |
 | `input.cleanup-manifest.csv`           | Các quy tắc làm sạch đã tìm thấy và xử lý gì   |
 | `input.shapes.docx`, `input.shapes\` | Sau bước convert: PNG, EMF và`manifest.csv`           |
-| `input.md`, `images\media\` | Kết quả của pandoc. Mọi ảnh EMF/WMF đã được chuyển sang PNG |
 | `input.pandoc.docx`, `input.pandoc-manifest.csv` | Sau bước prep: file pandoc thực sự đọc, và danh sách những gì đã sửa |
+| `input.md`, `images\media\` | Output thô của pandoc (sau bước media) |
 | `input.pipeline.log` | Log toàn bộ lần chạy |
+
+Đổi vị trí bằng `-OutputDir` và `-WorkDir`. Hai thư mục đi theo tên file, nên nhiều docx
+trong cùng một thư mục không ghi đè ảnh của nhau.
+
+Ảnh PNG trong `input.shapes\` không cần copy sang output. Bước convert **nhúng** các ảnh này
+vào `input.shapes.docx`, nên pandoc trích chúng ra `images\media\` như mọi ảnh khác, với tên
+`imageN.png`. Muốn biết ảnh trong md đến từ hình vẽ nào, xem thuộc tính `data-shape="S001"`
+và tra trong `input.shapes\manifest.csv`.
 
 Mã thoát: `0` là PASS, `3` là chạy xong nhưng có vấn đề, `1` là lỗi. Đặt `set NOPAUSE=1`
 để chạy không dừng, ví dụ khi dùng trong CI. Logic nằm trong `Invoke-Pipeline.ps1`;
@@ -437,11 +454,25 @@ Các điểm cải tiến và vấn đề đã biết nhưng chưa xử lý đư
 - Font render bằng GDI+ có thể hơi khác so với Word. Nếu cần giống tuyệt đối, có thể xuất
   PDF từ Word rồi crop.
 
+## Bước publish: `Publish-Output.ps1`
+
+Dựng thư mục `input.out\` từ md trong `input.work\`:
+
+- Chỉ copy những file trong `images\media\` mà md tham chiếu. File EMF/WMF gốc (đã có bản
+  PNG) và ảnh còn sót từ lần chạy trước bị bỏ qua. Log liệt kê các file không dùng.
+- Làm phẳng thư mục: `images/media/image19.png` thành `images/image19.png`. Chỉ sửa đúng các
+  đường dẫn link này, không đụng tới phần chữ nào khác.
+- Cảnh báo (mã thoát pipeline `3`) khi md trỏ tới file không tồn tại, hoặc còn EMF/WMF.
+- Thư mục được dựng ở `input.out.tmp\` rồi mới thay thế `input.out\`. Lần chạy lỗi giữ nguyên
+  output cũ.
+- Script chỉ xoá thư mục output khi nó rỗng hoặc có file đánh dấu `.pipeline-output` do
+  chính script tạo. Trỏ `-OutputDir` vào một thư mục có sẵn dữ liệu sẽ bị từ chối.
+
 ## Khi test xong, gửi lại
 
-- `input.pipeline.log`
-- `input.cleanup-manifest.csv`, nhất là các dòng khung đỏ bị xóa nhầm hoặc bị bỏ sót
-- `input.shapes\manifest.csv`
+- `input.work\input.pipeline.log`
+- `input.work\input.cleanup-manifest.csv`, nhất là các dòng khung đỏ bị xóa nhầm hoặc bị bỏ sót
+- `input.work\input.shapes\manifest.csv`
 - Log trên console, nhất là các dòng `FAILED`
 - Output của `Test-DocxDrawings.ps1` trước và sau khi convert
 - 1–2 ảnh PNG, ví dụ ảnh của Fig 7‑30, để đánh giá chất lượng render
