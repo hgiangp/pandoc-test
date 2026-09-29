@@ -1,0 +1,498 @@
+# Pipeline docx → markdown (pandoc)
+
+Pandoc bỏ qua các hình vẽ bằng Word Shapes mà không cảnh báo (canvas, group, autoshape,
+SmartArt, chart). Ngoài ra, một số bộ dữ liệu có hai đặc trưng riêng (profile `review-markup`):
+- Các **khung đỏ** do người review tự vẽ để đánh dấu. Khung không mang thông tin, nhưng làm
+  hình bị tách nhỏ hoặc sinh ra ảnh khung đỏ thừa.
+- Hình và bảng được đặt cùng caption trong một **bảng 1 ô dùng để dàn trang**. Pandoc vì vậy
+  xuất cả khối thành grid table, và ảnh cùng bảng hiển thị như bị đóng trong một ô.
+
+Pipeline dưới đây xử lý các vấn đề này trước và trong bước pandoc.
+
+```
+input.docx
+ ├─[1] preflight   Test-DocxDrawings.ps1        đếm các hình pandoc sẽ bỏ qua
+ ├─[2] cleanup     cleanup\ (Python)            làm sạch dữ liệu theo profile, bật/tắt được → input.clean.docx
+ │                   ReviewerBoxes → UnwrapLayoutTables   (profile review-markup)
+ ├─[3] convert     Convert-ShapesToPictures.ps1 chuyển hình vẽ sang PNG bằng Word  → input.shapes.docx
+ ├─[4] prep        cleanup\ + profiles\pandoc.json  vá giới hạn của pandoc, luôn bật → input.pandoc.docx
+ │                   ExpandSimpleFields
+ ├─[5] pandoc      -t gfm --wrap=none --lua-filter=pandoc\figures.lua             → input.md + images\
+ ├─[6] media       Convert-MediaToPng.ps1       chuyển EMF/WMF còn sót sang PNG, sửa link
+ ├─[7] publish     Publish-Output.ps1           md + chỉ các ảnh md dùng → input.out\
+ └─[8] gate        Test-DocxDrawings.ps1        kiểm tra không còn hình nào bị mất
+```
+
+- Bước **cleanup** xử lý vấn đề riêng của **dữ liệu**, bật/tắt theo profile. Bước **convert**
+  và bước **prep** vá giới hạn của **pandoc**, áp dụng cho mọi tài liệu. Tắt cleanup thì
+  pipeline vẫn chạy bình thường với các bước còn lại.
+- Cleanup chạy trước convert, để khung đỏ không bị gom chung với hình thật, và để ảnh PNG
+  được chèn ra ngoài bảng, ngay trước caption.
+- Mỗi bước ghi ra file docx mới. Mọi file trung gian đều được giữ lại trong `input.work\` để
+  mở bằng Word kiểm tra. File gốc không bao giờ bị sửa.
+- Kết quả bàn giao nằm riêng trong `input.out\`: chỉ có file md và các ảnh md tham chiếu.
+
+### Nguyên tắc: xử lý ở bước nào?
+
+Khi gặp một trường hợp mới, chọn bước theo **bản chất** của vấn đề:
+
+| Bản chất của vấn đề | Xử lý ở | Ví dụ |
+|---|---|---|
+| **Nhiễu cấu trúc của dữ liệu nguồn**: những thứ không phải nội dung, do cách soạn thảo hoặc review | **Cleanup** (quy tắc Python sửa XML của docx, bật/tắt theo profile) | Khung đỏ của người review, bảng 1 ô dùng để dàn trang |
+| **Giới hạn của pandoc**: đối tượng cần được **render** mới đọc được | **Convert** (dùng Word) | Shape, canvas, SmartArt, chart, OLE, EMF |
+| **Giới hạn của pandoc**: cấu trúc XML hợp lệ nhưng pandoc đọc sai | **Prep** (quy tắc Python trong `profiles\pandoc.json`, luôn bật, chạy sau lần lưu cuối của Word) | `w:fldSimple`: pandoc bỏ mất chữ của field |
+| **Cách trình bày đầu ra**, phụ thuộc vào ai đọc markdown | **Lua filter trong pandoc** (sửa trên AST) | Alt text, title và id của ảnh, định dạng bảng, caption của bảng |
+| Chỉnh sửa thuần văn bản trên file `.md` | Bước hậu xử lý bằng chữ, **chỉ khi thật cần** | Chuẩn hóa khoảng trắng |
+
+Lý do:
+- **Sửa cấu trúc ở nguồn thì pandoc hiểu đúng cấu trúc.** Ví dụ: sau khi gỡ bảng bọc ở
+  docx, pandoc tự ghép ảnh với caption thành figure, tự gắn caption cho bảng và giữ bookmark.
+  Gỡ ở sau thì phải tự dựng lại những thứ đó.
+- Ở mức docx còn đọc được thông tin Word (style Caption, field SEQ, màu và hình dạng shape);
+  sang markdown thì các thông tin này đã mất.
+- **Không sửa cấu trúc bằng regex trên file `.md`.** Grid table, ký tự escape và ngắt dòng làm
+  cách này rất dễ vỡ. Việc cần làm sau pandoc thì làm trên AST bằng Lua filter.
+- Logic riêng của một bộ dữ liệu phải nằm trong profile của cleanup, không trộn vào các bước
+  chung (convert, pandoc).
+
+## Cài đặt (một lần trên máy chạy)
+
+Yêu cầu đầy đủ (Windows, Word đã kích hoạt, PowerShell 5.1, bước nào cần gì) và hướng dẫn
+sử dụng cho người dùng cuối: xem [README.md](../README.md) ở thư mục gốc.
+
+| Thành phần                          | Dùng cho                                          | Cài đặt                                                                           |
+| ------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Windows + Word desktop 2013 trở lên | convert                                            | –                                                                                   |
+| Windows PowerShell 5.1                | toàn bộ                                          | Có sẵn trên Windows                                                               |
+| pandoc                                | pandoc                                             | `winget install --id JohnMacFarlane.Pandoc`                                        |
+| [uv](https://docs.astral.sh/uv/) | cleanup và prep (prep luôn chạy, trừ khi dùng `-NoPandocPrep`) | `winget install --id astral-sh.uv -e`. **Không cần cài Python riêng**: lần chạy đầu, uv tự tải Python 3.12 (ghim trong `cleanup\.python-version`) và các thư viện đúng phiên bản trong `cleanup\uv.lock` (cần internet lần đầu) |
+
+## Cách chạy nhanh: dùng file .bat
+
+Double-click, hoặc kéo thả file docx vào file `.bat`:
+
+| File                                                    | Việc làm                                                                |
+| ------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `run-review-markup.bat input.docx`                    | **Pipeline đầy đủ với profile `review-markup`** (có làm sạch khung đỏ) |
+| `run-all.bat input.docx [tham số]`                   | Pipeline đầy đủ. Mặc định**không** làm sạch               |
+| `cleanup.bat input.docx --profile review-markup [--mode Report]` | Chỉ chạy bước làm sạch (`uv run ... docx-cleanup`) |
+| `convert.bat input.docx [-DryRun]`                    | Chỉ chạy bước convert                                                 |
+
+```bat
+rem Lần đầu với dữ liệu mới: chỉ báo cáo, chưa xóa gì, để kiểm tra kết quả nhận diện
+run-all.bat input.docx -Profile review-markup -CleanupMode Report
+
+rem Chạy thật với profile review-markup
+run-review-markup.bat input.docx
+
+rem So sánh với khi không làm sạch / không dùng filter của pandoc
+run-all.bat input.docx -NoCleanup
+run-all.bat input.docx -Profile review-markup -NoFigureFilter
+```
+
+Kết quả nằm trong hai thư mục cạnh `input.docx`:
+
+```
+input.out\          kết quả bàn giao, được tạo lại sau mỗi lần chạy
+  input.md
+  images\           chỉ các ảnh md tham chiếu (PNG), link dạng images/image19.png
+input.work\         file trung gian để kiểm tra
+```
+
+| File trong `input.work\`                 | Nội dung                                                  |
+| ---------------------------------------- | ---------------------------------------------------------- |
+| `input.clean.docx`                     | Sau bước làm sạch (chỉ có khi profile bật quy tắc) |
+| `input.cleanup-manifest.csv`           | Các quy tắc làm sạch đã tìm thấy và xử lý gì   |
+| `input.shapes.docx`, `input.shapes\` | Sau bước convert: PNG, EMF và`manifest.csv`           |
+| `input.pandoc.docx`, `input.pandoc-manifest.csv` | Sau bước prep: file pandoc thực sự đọc, và danh sách những gì đã sửa |
+| `input.md`, `images\media\` | Output thô của pandoc (sau bước media) |
+| `input.pipeline.log` | Log toàn bộ lần chạy |
+
+Đổi vị trí bằng `-OutputDir` và `-WorkDir`. Hai thư mục đi theo tên file, nên nhiều docx
+trong cùng một thư mục không ghi đè ảnh của nhau.
+
+Ảnh PNG trong `input.shapes\` không cần copy sang output. Bước convert **nhúng** các ảnh này
+vào `input.shapes.docx`, nên pandoc trích chúng ra `images\media\` như mọi ảnh khác, với tên
+`imageN.png`. Muốn biết ảnh trong md đến từ hình vẽ nào, xem thuộc tính `data-shape="S001"`
+và tra trong `input.shapes\manifest.csv`.
+
+Mã thoát: `0` là PASS, `3` là chạy xong nhưng có vấn đề, `1` là lỗi. Đặt `set NOPAUSE=1`
+để chạy không dừng, ví dụ khi dùng trong CI. Logic nằm trong `Invoke-Pipeline.ps1`;
+file `.bat` chỉ là lớp bao để gọi cho tiện.
+
+## Làm sạch dữ liệu (cleanup)
+
+### Profile
+
+Mỗi profile là một file JSON trong `profiles\`. Trong profile, mỗi quy tắc có một `mode`:
+
+| mode       | Hành vi                                                 |
+| ---------- | -------------------------------------------------------- |
+| `Off`    | Không chạy                                             |
+| `Report` | Chỉ nhận diện và ghi vào manifest, không sửa docx |
+| `Apply`  | Nhận diện và xử lý (xóa)                           |
+
+- `default.json`: mọi quy tắc `Off`. Bước cleanup được bỏ qua.
+- `pandoc.json`: **không phải profile làm sạch**. Đây là profile cố định của bước prep, luôn
+  được áp dụng ngay trước pandoc. Không truyền nó vào `-Profile`.
+- `review-markup.json`: `ReviewerBoxes` rồi `UnwrapLayoutTables`, cả hai `Apply`. **Các quy tắc chạy
+  theo đúng thứ tự trong profile.** ReviewerBoxes phải chạy trước, để khung đỏ nằm trong bảng
+  bọc bị xóa trước khi nội dung của bảng được đưa ra ngoài.
+- Tham số `-CleanupMode Report` (trong `run-all.bat`) hoặc `--mode Report` (trong
+  `cleanup.bat`) ép mọi quy tắc **đang bật** chạy ở chế độ Report. Tham số này không bao giờ
+  bật một quy tắc đang `Off`.
+- Nếu profile có tên tham số sai (gõ nhầm), chương trình dừng với lỗi và báo rõ, không âm
+  thầm dùng giá trị mặc định.
+
+### Quy tắc `ReviewerBoxes`: khung đỏ của người review
+
+Một shape được coi là khung đánh dấu khi thỏa **tất cả** điều kiện sau:
+
+| Điều kiện                                                                                                             | Tham số                                        | Mặc định                                  |
+| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- | -------------------------------------------- |
+| Hình chữ nhật hoặc chữ nhật bo góc                                                                                | `geometries`                                  | `["rect", "roundRect"]`                    |
+| Không tô nền, hoặc nền gần trong suốt                                                                             | `maxFillOpacity`                              | `0.1`                                      |
+| Viền đỏ: gần một màu trong danh sách, hoặc có sắc đỏ rõ                                                     | `colors`, `colorTolerance`, `matchRedHue` | `FF0000, C00000`; `60`; `true` |
+| Không chứa chữ                                                                                                        | –                                              | –                                           |
+| Không có connector (mũi tên) nối vào. Ô trong sơ đồ thường có mũi tên nối, khung đánh dấu thì không | –                                              | –                                           |
+
+| Mức tin cậy | Khi nào                                                              | Xử lý ở chế độ Apply             |
+| ------------- | --------------------------------------------------------------------- | -------------------------------------- |
+| `high`      | Thỏa hết điều kiện, là shape đứng riêng                      | Xóa                                   |
+| `medium`    | Thỏa hết điều kiện, nhưng nằm trong group hoặc canvas         | Chỉ xóa khi`includeInGroups: true` |
+| `low`       | Viền màu đỏ hoặc gần đỏ, và trượt đúng một điều kiện | Chỉ báo cáo, dùng để tinh chỉnh |
+
+Màu được đọc cả khi đặt trực tiếp (`srgbClr`), khi lấy từ theme (`schemeClr`, có tính các
+biến thể sáng/tối), khi lấy từ style của shape (`lnRef`) và khi là shape VML. Phần
+`mc:Fallback` (bản sao VML của cùng một shape) không bị đếm lặp.
+
+Khi xóa:
+
+- **Shape đứng riêng**: xóa cả khối `mc:AlternateContent`, gồm cả phần Fallback. Chữ nằm
+  bên dưới khung vẫn giữ nguyên.
+- **Shape trong group/canvas**: chỉ xóa shape con. Phần Fallback của group bị bỏ, vì không
+  còn khớp với nội dung mới; Word sẽ tạo lại phần này ở bước convert. Nếu group không còn
+  shape nào thì xóa luôn group.
+
+### Quy tắc `UnwrapLayoutTables`: bảng 1 ô bọc hình/bảng và caption
+
+Một bảng được coi là **bảng bọc để dàn trang** khi thỏa tất cả điều kiện sau:
+
+| Điều kiện | Tham số | Mặc định |
+|---|---|---|
+| Chỉ có 1 cột (mỗi hàng đúng 1 ô) | – | – |
+| Không quá `maxRows` hàng, ví dụ hình ở hàng 1 và caption ở hàng 2 | `maxRows` | `4` |
+| Chứa hình (drawing, picture, OLE) hoặc một bảng con | – | – |
+| Có caption: style Caption (hoặc style kế thừa từ nó), hoặc đoạn văn chứa field `SEQ` | – | – |
+
+Style Caption được tìm theo **tên** (`caption`), không theo id. Word bản địa hóa (tiếng Nhật,
+tiếng Việt…) lưu id dạng `a3`, nhưng tên style dựng sẵn thì luôn là tiếng Anh.
+
+| Mức tin cậy | Khi nào | Xử lý ở chế độ Apply |
+|---|---|---|
+| `high` | Thỏa hết điều kiện | Gỡ bảng bọc: nội dung trong ô (đoạn văn, ảnh, bảng con, bookmark) được đưa ra ngoài theo đúng thứ tự |
+| `medium` | Có hình/bảng con nhưng không có caption | Chỉ gỡ khi `unwrapWithoutCaption: true` |
+| `low` | Vượt `maxRows`, hoặc chỉ chứa chữ (ví dụ khung Note) | Chỉ báo cáo |
+
+Bảng nhiều cột, ví dụ hai hình đặt cạnh nhau, **không bao giờ** bị gỡ.
+
+Bookmark `_Ref…` (đích của các link "Fig. 3‑2", "Table 1‑2") đi theo caption, nên tham
+chiếu chéo vẫn hoạt động sau khi gỡ.
+
+### Đọc `input.cleanup-manifest.csv`
+
+| Cột                                      | Ý nghĩa                                                                                                                      |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `Action` | `removed`, `unwrapped`, `reported`, hoặc `reported (set … to …)` khi quy tắc cần bật thêm tham số mới xử lý |
+| `Confidence` / `Reason`               | Mức tin cậy; với mức`low`, cột này ghi điều kiện bị trượt (`fails: fill`, `fails: text`, …)                 |
+| `Part`, `Paragraph`                   | Phần tài liệu (document, header, …) và số thứ tự paragraph chứa shape                                                 |
+| `Location`                              | Chữ của paragraph đó, hoặc của paragraph không rỗng kế tiếp (thường là caption), giúp tìm lại shape trong Word |
+| `ShapeId`, `ShapeName`, `Container` | Id và tên trong Word;`top`, `group` hoặc `canvas`                                                                     |
+| `Features`                              | Các đặc trưng đã đo (JSON): hình dạng, màu viền, độ dày viền, kiểu nét, độ trong suốt của nền, …        |
+
+**Cách tinh chỉnh**:
+
+- Nếu thấy dòng `low` với `fails: color` mà đúng là khung đánh dấu, thêm màu ở `Features.lineColor` vào `colors`.
+- Nếu thấy dòng `medium` đúng là khung đánh dấu, đặt `includeInGroups: true`.
+- Nếu shape bị xóa nhầm, chuyển quy tắc về `Report` và gửi dòng manifest tương ứng cho mình.
+
+### Thêm quy tắc mới
+
+1. Tạo `cleanup\docx_cleanup\rules\<ten_quy_tac>.py`, kế thừa `Rule` (`model.py`) và cài đặt
+   `detect()` (không được sửa docx) và `apply()`.
+2. Đăng ký class trong `registry.py`.
+3. Thêm cấu hình vào đúng profile, theo mục "Nguyên tắc: xử lý ở bước nào?":
+   `profiles\<tên>.json` nếu là làm sạch cho một bộ dữ liệu, `profiles\pandoc.json` nếu là vá giới hạn
+   của pandoc cho mọi tài liệu.
+4. Viết test trong `cleanup\tests\`. `conftest.py` có sẵn các hàm tạo docx mẫu (shape,
+   group, canvas, VML).
+
+Các thao tác xóa an toàn (xử lý AlternateContent/Fallback, dọn run rỗng, kiểm tra file sau
+khi ghi) nằm tập trung trong `DocxPackage` (`package.py`). Quy tắc mới nên gọi các hàm này,
+không tự thao tác trực tiếp trên XML.
+
+### Quản lý package bằng uv
+
+`cleanup\` là một uv project:
+
+| File | Vai trò |
+|---|---|
+| `pyproject.toml` | Khai báo dependency (`lxml`), nhóm dev (`pytest`) và lệnh `docx-cleanup` |
+| `uv.lock` | Ghim chính xác phiên bản mọi thư viện, **phải commit** |
+| `.python-version` | Phiên bản Python uv dùng (3.12). Code tương thích Python ≥ 3.9 |
+
+Pipeline gọi `uv run --project cleanup --locked --no-dev docx-cleanup ...`:
+- `--locked`: báo lỗi nếu `uv.lock` không khớp `pyproject.toml`, thay vì âm thầm cài phiên bản khác.
+- `--no-dev`: không cài pytest trên máy xử lý.
+
+```bash
+cd scripts/cleanup
+uv sync                                  # tạo .venv (có cả nhóm dev)
+uv run pytest                            # chạy test, không cần Windows
+PANDOC=/path/to/pandoc uv run pytest     # thêm test đầu cuối chạy pandoc thật (tự bỏ qua nếu không có pandoc)
+uv run --isolated --python 3.9 pytest    # kiểm tra tương thích Python 3.9
+uv add <package>                         # thêm dependency (tự cập nhật uv.lock)
+uv lock --upgrade                        # nâng phiên bản các thư viện
+```
+
+## Bước prep: vá giới hạn của pandoc (`profiles\pandoc.json`)
+
+Bước này chạy **sau lần lưu cuối của Word** (bước convert) và ngay trước pandoc, áp dụng cho
+mọi tài liệu. Muốn tắt để so sánh thì dùng `-NoPandocPrep`. Các thay đổi được ghi vào
+`input.pandoc-manifest.csv`.
+
+### Quy tắc `ExpandSimpleFields`
+
+Word lưu một field (số caption, tham chiếu chéo…) theo một trong hai dạng: **field đầy đủ**
+(`w:fldChar` begin/separate/end) hoặc **dạng rút gọn** `w:fldSimple`. Pandoc (đã kiểm tra các
+bản 3.1–3.11) **bỏ mất chữ** của mọi `w:fldSimple`:
+
+| Trong Word | Field | Pandoc, không có prep | Pandoc, có prep |
+|---|---|---|---|
+| `Table 1‑3 Example` | `SEQ`, `STYLEREF` dạng `fldSimple` | `Example`: mất cả nhãn và số | `Table 1‑3 Example` |
+| `Fig. 4‑1 Example of` | `STYLEREF` dạng `fldSimple` | `Fig. ‑1 Example of` | `Fig. 4‑1 Example of` |
+| `shown in Table 1‑3` | `REF` dạng `fldSimple` | `shown in`: mất tham chiếu | `shown in [Table 1‑3](#_Ref…)` (pandoc 3.11; bản cũ hơn ra chữ thường) |
+
+Quy tắc chuyển mỗi `w:fldSimple` sang dạng field đầy đủ, giữ nguyên câu lệnh, kết quả và định
+dạng. Trong Word, tài liệu hiển thị y như cũ.
+
+Trong tài liệu mẫu đã kiểm tra, các `fldSimple` (STYLEREF, SEQ) có sẵn ngay từ file gốc, đều
+là số của caption. Không phải Word tạo ra chúng khi lưu ở bước convert.
+
+## Bước media: `Convert-MediaToPng.ps1`
+
+Trình xem markdown và trình duyệt không hiển thị được EMF/WMF. Phần lớn ảnh dạng này đã được
+bước convert chuyển sang PNG (ảnh inline, đối tượng OLE, ảnh nằm trong group/canvas), nhưng
+vẫn có trường hợp lọt ra: **ảnh EMF/WMF dạng floating**, hoặc khi chạy với `-KeepMetafiles`.
+
+Bước này là lớp chặn cuối: quét `images\`, render mọi file `.emf`/`.wmf` sang PNG bằng GDI+
+(cùng bộ render với bước convert, `lib\ShapeRaster.cs`), rồi sửa **đúng tên file** trong
+markdown, không đụng tới phần chữ nào khác. File gốc được giữ lại, trừ khi dùng
+`-RemoveOriginals`. Tắt bước này bằng `-NoMediaConvert`.
+
+Ảnh ở đây không bị cắt viền trắng, khác với hình vẽ, vì lề của một tấm ảnh có thể là phần
+nội dung.
+
+## Bước pandoc: định dạng đầu ra và `pandoc\figures.lua`
+
+### Định dạng đầu ra: GFM
+
+Pipeline xuất **GFM** (GitHub Flavored Markdown, `-t gfm`), không xuất Pandoc Markdown
+(`-t markdown`). Lý do là cần cân bằng giữa người đọc và AI:
+
+| Tiêu chí | Pandoc Markdown | **GFM (mặc định)** |
+|---|---|---|
+| Người đọc (GitHub, VS Code, GitLab) | ❌ Grid table `+---+`, `{…}` và `: caption` hiện thành chữ thô | ✅ Hiển thị đúng |
+| AI, bảng đơn giản | Grid table: nhiều dấu cách căn cột, tốn token | Bảng pipe: gọn nhất |
+| AI, bảng phức tạp (ô nhiều đoạn, có caption, không có hàng tiêu đề) | Grid table: nội dung một ô bị tách qua nhiều dòng | Bảng HTML `<table>` + `<caption>`: ranh giới ô rõ ràng |
+| AI, hình | Ảnh + thuộc tính `{alt=…}` | `<figure>` gồm ảnh (có alt text) và `<figcaption>` |
+
+Các giới hạn của bảng pipe trong GFM: mỗi ô chỉ một dòng, bắt buộc có hàng tiêu đề, không có
+caption. Bảng nào vi phạm, pandoc sẽ xuất thành bảng HTML. Muốn bảng đơn giản ra bảng pipe
+thì trong Word, hàng đầu tiên phải được đánh dấu "Repeat as header row".
+
+**Yêu cầu với hệ thống phía sau (RAG/LLM):** phải giữ thẻ HTML trong markdown, và không được
+cắt chunk giữa một `<table>` hay `<figure>`.
+
+Muốn xuất Pandoc Markdown để so sánh: `run-all.bat input.docx -OutputFormat markdown`.
+
+Gỡ bảng bọc (cleanup) vẫn **cần thiết** với GFM. Nếu không gỡ, hình và bảng dữ liệu trở
+thành bảng HTML lồng trong một bảng HTML khác: người đọc vẫn thấy khung bao quanh, còn AI
+không biết caption thuộc về hình hay bảng nào.
+
+### `figures.lua`
+
+Lua filter chạy trong pandoc, xử lý các ảnh do bước convert tạo ra:
+
+| Việc | Trước | Sau |
+|---|---|---|
+| Title `shape2png:S001` (dùng để đối chiếu với manifest) chuyển thành thuộc tính | `"shape2png:S001"` | `data-shape="S001"` |
+| Alt text chứa chữ trong hình: giữ lại cho LLM, bỏ dấu `\|` vốn gây xung đột với cú pháp bảng | `Drawing converted to image. Text: A \| B` | `Text in figure: A; B` |
+| Bookmark trong caption của figure chuyển lên figure | `<span id="_Ref1" class="anchor">` nằm trong caption | `<figure id="_Ref1">` |
+| **Caption của bảng đặt phía trên bảng** (chỉ với `gfm`). Bảng pipe không có cú pháp caption, nên pandoc đặt caption xuống dưới; bảng HTML thì lại dùng `<caption>`. Filter thống nhất một dạng, đúng thứ tự như trong Word | Caption nằm dưới bảng pipe, hoặc trong `<caption>` | Đoạn văn caption (giữ bookmark) đứng trước bảng |
+
+Khi ảnh đứng ngay trước một đoạn caption, pandoc tự ghép hai phần thành một figure.
+Kết quả với GFM:
+
+```html
+<figure id="_Ref100000001">
+<img src="images/media/image19.png" style="width:2.5in;height:2.38in" data-shape="S001" alt="Text in figure: Idle; Running; Stopped" />
+<figcaption><p>Fig. 3‑2 State transitions</p></figcaption>
+</figure>
+```
+
+Caption của bảng là một đoạn văn ngay trước bảng, bắt đầu bằng bookmark
+`<span id="_Ref…" class="anchor"></span>`. Link tham chiếu chéo
+(`[Fig. 3‑2](#_Ref100000001)`, `[Table 1‑2](#_Ref100000002)`) trỏ tới `id` của figure hoặc
+tới bookmark của caption bảng.
+
+`--wrap=none`: không ngắt dòng giữa cú pháp ảnh hay link.
+
+Đã kiểm thử với pandoc 3.1.11 và 3.11, cả `gfm` và `markdown`. Filter cần pandoc ≥ 3.0.
+
+## Các bước chạy thủ công (bước convert)
+
+```powershell
+cd <thư mục chứa script>
+
+# 0. Preflight: đếm số đối tượng pandoc sẽ bỏ qua (không cần Word)
+powershell -ExecutionPolicy Bypass -File .\Test-DocxDrawings.ps1 -Docx .\input.docx
+
+# 1. Dry run: chỉ liệt kê, không thay đổi gì -> input.shapes\manifest.csv
+powershell -ExecutionPolicy Bypass -File .\Convert-ShapesToPictures.ps1 -InputPath .\input.docx -DryRun
+
+# 2. Convert -> input.shapes.docx + input.shapes\S001.png, S001.emf, ..., manifest.csv
+powershell -ExecutionPolicy Bypass -File .\Convert-ShapesToPictures.ps1 -InputPath .\input.docx
+
+# 3. Chạy pandoc trên file đã convert
+pandoc -f docx -t gfm --wrap=none --extract-media=./images --lua-filter=.\pandoc\figures.lua .\input.shapes.docx -o output.md
+
+# 4. Gate: fail nếu còn đối tượng pandoc sẽ bỏ qua; cảnh báo (không fail) nếu số caption > số ảnh
+powershell -ExecutionPolicy Bypass -File .\Test-DocxDrawings.ps1 -Docx .\input.shapes.docx -Markdown .\output.md
+```
+
+Trong lúc bước convert chạy, **không dùng clipboard**, vì script cần copy/paste để lấy hình
+của các shape floating.
+
+## Tham số của bước convert
+
+| Tham số              | Mặc định             | Ý nghĩa                                                                                                                            |
+| --------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `-OutputPath`       | `<input>.shapes.docx` | File docx kết quả                                                                                                                  |
+| `-ImageDir`         | `<input>.shapes\`     | Thư mục chứa PNG, EMF (để debug) và`manifest.csv`                                                                            |
+| `-Dpi`              | 200                     | Độ phân giải PNG                                                                                                                 |
+| `-IncludeTextBoxes` | tắt                    | Chuyển cả text box đứng riêng. Mặc định giữ lại để không mất văn bản                                                 |
+| `-KeepMetafiles`    | tắt                    | Giữ nguyên OLE (Visio...) và ảnh EMF/WMF. Mặc định sẽ chuyển sang PNG vì trình xem markdown không hiển thị được EMF |
+| `-NoCluster`        | tắt                    | Không gộp các shape rời của cùng một hình                                                                                    |
+| `-NoTrim`           | tắt                    | Không cắt viền trắng                                                                                                             |
+| `-DryRun`           | tắt                    | Chỉ liệt kê                                                                                                                       |
+| `-Visible` | tắt | Hiện cửa sổ Word để debug |
+| `-UnlinkShapeFields` | tắt | Chuyển field trong shape thành chữ thường trước khi render. Chỉ dùng khi ảnh vẫn hiện `Error! Reference source not found.` |
+| `-NoHeadingNumbers` | tắt | Không ghi số mục của Word ("7.5") vào tiêu đề |
+| `-NoPageInfo` | tắt | Bỏ trống cột `Page` trong manifest. Mỗi lần đọc số trang, Word phải phân trang lại, nên tùy chọn này giúp chạy nhanh hơn với tài liệu dài |
+
+Exit code: `0` là OK, `2` là có đối tượng convert thất bại (xem cột `Error` trong manifest).
+
+**Tốc độ.** Bước convert in thời gian của từng phần (shape floating, shape inline, ghi số mục,
+lưu file) để dễ tìm chỗ chậm. Script tắt phân trang nền, kiểm tra chính tả và ngữ pháp, tắt vẽ
+màn hình (trừ khi dùng `-Visible`), rồi khôi phục các tùy chọn này trước khi thoát Word.
+Với tài liệu dài, `-NoPageInfo` thường là tùy chọn có tác dụng rõ nhất.
+
+## Cách hoạt động của bước convert
+
+1. **Shape floating** (`Document.Shapes`):
+   - Các shape rời thuộc cùng một hình được **gộp thành một group** trước khi render. Hai
+     shape được coi là cùng hình nếu cùng caption `Fig./Figure/Hình` và cùng trang, hoặc
+     cùng paragraph anchor. Mục đích là không để một hình bị cắt thành nhiều ảnh nhỏ.
+   - Cách lấy hình được thử theo thứ tự:
+     1. `ConvertToInlineShape()`, chỉ áp dụng được cho picture/OLE.
+     2. Copy rồi đọc EMF từ clipboard qua Win32.
+     3. Paste Special dạng EMF vào một document tạm.
+   - PNG được chèn thành một paragraph riêng (style Normal) ngay trước paragraph anchor,
+     sau đó xóa shape gốc.
+2. **Shape inline** (`Document.InlineShapes`): script phân loại theo XML
+   (`Range.WordOpenXML`) chứ không theo kiểu COM, vì Word không phân loại đúng các
+   shape/group/canvas DrawingML nằm inline. Hình được lấy qua `Range.EnhMetaFileBits`
+   và thay tại chỗ.
+3. **Khóa field trong shape trước khi chuyển đổi.** Khi Word chuyển shape hoặc render EMF,
+   nó cập nhật lại các field trong shape, ví dụ tham chiếu chéo "refer to 7.5". Lúc đó shape
+   tạm thời tách khỏi văn bản nên không thấy bookmark, và field bị thay bằng
+   `Error! Reference source not found.`, rồi bị vẽ luôn vào ảnh. Ngay sau khi mở tài liệu,
+   script đặt `Locked = True` cho **mọi field của tài liệu** (mọi story, kể cả trong shape),
+   và tắt `Options.UpdateFieldsAtPrint`. Field đã khóa thì Word không cập nhật, nên giá trị
+   hiện tại được giữ nguyên. Nếu vẫn lỗi, dùng `-UnlinkShapeFields` để chuyển các field nằm
+   trong shape (`wdTextFrameStory`) thành chữ thường.
+4. **Ghi số mục vào tiêu đề.** Pandoc bỏ qua phần đánh số tự động của Word, nên `7.5 System
+   settings` chỉ còn `System settings`, và mọi tham chiếu "refer to 7.5" mất đích. Word đã biết số
+   của từng heading (`ListFormat.ListString`), nên script đọc số đó, ghi vào đầu tiêu đề
+   thành chữ thường, rồi tắt đánh số tự động của paragraph để file trung gian không hiện số
+   hai lần. Chỉ áp dụng cho paragraph có outline level 1–9; danh sách đánh số trong thân bài
+   không bị đụng tới, vì pandoc vốn chuyển đúng chúng thành danh sách markdown. Tiêu đề đã tự
+   gõ sẵn số thì được bỏ qua. Tắt bằng `-NoHeadingNumbers`.
+   Việc khóa toàn bộ field ở mục 3 cũng cần cho bước này: field `STYLEREF` trong caption lấy
+   số chương từ chính phần đánh số này, nên phải chặn Word cập nhật lại chúng.
+5. EMF được render sang PNG bằng GDI+. PNG được gán DPI để Word giữ đúng kích thước in.
+6. **Text trong hình** (các ô trạng thái, nhãn mũi tên...) được ghi vào alt text của ảnh.
+   Alt text có dạng `Drawing converted to image. Text: Idle | Running ...`; `figures.lua`
+   đổi thành `Text in figure: Idle; Running ...`. Nhờ vậy thông tin vẫn tìm kiếm được
+   và dùng được cho RAG/LLM.
+
+## Giới hạn đã biết
+
+Các điểm cải tiến và vấn đề đã biết nhưng chưa xử lý được theo dõi trong [BACKLOG.md](BACKLOG.md).
+
+- Nếu caption nằm trong một text box floating cạnh hình, text box đó có thể bị gộp vào
+  cluster và render thành ảnh. Caption khi đó chỉ còn trong alt text. Nên kiểm tra các
+  cluster trong manifest.
+- Macro trong file input không bao giờ chạy (`AutomationSecurity = ForceDisable`).
+- Máy bị khóa bằng AppLocker/WDAC (PowerShell ở Constrained Language Mode) không chạy
+  được `Add-Type`/COM. Script sẽ báo lỗi rõ ràng ngay từ đầu.
+- Tài liệu bị Restrict Editing có mật khẩu: phải gỡ bảo vệ trong Word trước khi chạy.
+- Chỉ xử lý nội dung chính của document. Shape nằm trong header, footer, footnote và
+  comment chưa được xử lý.
+- Việc gộp shape rời dựa vào caption. Nếu hình không có caption và các shape neo ở nhiều
+  paragraph khác nhau, chúng có thể ra thành nhiều ảnh. Hãy xem manifest; nếu cần, gộp
+  thủ công trong Word (Select, rồi Group).
+- Word không cho group một drawing canvas với shape khác. Khi đó cluster được tách ra và
+  convert từng shape riêng (manifest ghi `Action=split`).
+- Ảnh EMF/WMF dạng **floating** không được chuyển ở bước convert; bước media
+  (`Convert-MediaToPng.ps1`) chuyển chúng sang PNG sau pandoc.
+- Font render bằng GDI+ có thể hơi khác so với Word. Nếu cần giống tuyệt đối, có thể xuất
+  PDF từ Word rồi crop.
+
+## Bước publish: `Publish-Output.ps1`
+
+Dựng thư mục `input.out\` từ md trong `input.work\`:
+
+- Chỉ copy những file trong `images\media\` mà md tham chiếu. File EMF/WMF gốc (đã có bản
+  PNG) và ảnh còn sót từ lần chạy trước bị bỏ qua. Log liệt kê các file không dùng.
+- Làm phẳng thư mục: `images/media/image19.png` thành `images/image19.png`. Chỉ sửa đúng các
+  đường dẫn link này, không đụng tới phần chữ nào khác.
+- Cảnh báo (mã thoát pipeline `3`) khi md trỏ tới file không tồn tại, hoặc còn EMF/WMF.
+- Thư mục được dựng ở `input.out.tmp\` rồi mới thay thế `input.out\`. Lần chạy lỗi giữ nguyên
+  output cũ.
+- Script chỉ xoá thư mục output khi nó rỗng hoặc có file đánh dấu `.pipeline-output` do
+  chính script tạo. Trỏ `-OutputDir` vào một thư mục có sẵn dữ liệu sẽ bị từ chối.
+
+## Khi test xong, gửi lại
+
+- `input.work\input.pipeline.log`
+- `input.work\input.cleanup-manifest.csv`, nhất là các dòng khung đỏ bị xóa nhầm hoặc bị bỏ sót
+- `input.work\input.shapes\manifest.csv`
+- Log trên console, nhất là các dòng `FAILED`
+- Output của `Test-DocxDrawings.ps1` trước và sau khi convert
+- 1–2 ảnh PNG, ví dụ ảnh của một sơ đồ có nhiều chữ, để đánh giá chất lượng render
+
+## Xử lý sự cố
+
+| Triệu chứng                                               | Cách xử lý                                                                                                             |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `uv not found in PATH` | `winget install --id astral-sh.uv -e`, mở lại cửa sổ terminal; hoặc chạy với `-NoCleanup` |
+| `The lockfile ... needs to be updated` | `uv.lock` không khớp `pyproject.toml`: chạy `uv lock` trong `cleanup\` rồi commit |
+| Lần đầu chạy cleanup bị lỗi tải | uv cần internet để tải Python và thư viện lần đầu. Nếu có proxy, đặt `HTTPS_PROXY` |
+| `running scripts is disabled`                             | Chạy qua`powershell -ExecutionPolicy Bypass -File ...`                                                                 |
+| File tải từ mạng không mở được                      | `Unblock-File .\input.docx`                                                                                             |
+| Treo hoặc lỗi COM                                         | Đóng hết Word (`Get-Process WINWORD \| Stop-Process`), rồi chạy lại với `-Visible` để xem Word đang báo gì |
+| Nhiều dòng`FAILED` với `clipboard`/`Paste Special` | Không dùng clipboard trong lúc chạy; tắt các app quản lý clipboard                                                |
+| Ảnh hiện `Error! Reference source not found.` | Field trong shape bị Word cập nhật lúc render. Script đã khóa field; nếu vẫn lỗi, chạy lại với `-UnlinkShapeFields`. Cột `Text` trong manifest cho biết chữ đúng là gì |
+| PNG bị cắt hoặc thừa viền                              | Chạy với`-NoTrim`, rồi so với file `.emf` tương ứng                                                            |
