@@ -1,146 +1,145 @@
 # docx → markdown (pandoc)
 
-Chuyển tài liệu Word (`.docx`) sang markdown (GFM) kèm ảnh, không làm mất các hình vẽ bằng
-Word Shapes (canvas, group, autoshape, SmartArt, chart, Visio/OLE, EMF/WMF). Nếu chỉ chạy
-pandoc, các hình này bị bỏ qua mà không có cảnh báo nào.
+Converts Word documents (`.docx`) to markdown (GFM) with images, without losing drawings
+made with Word Shapes (canvas, group, autoshape, SmartArt, chart, Visio/OLE, EMF/WMF). Plain
+pandoc drops these drawings without any warning.
 
-Tài liệu này là **hướng dẫn sử dụng**. Chi tiết kỹ thuật của từng bước, các quy tắc làm sạch
-và cách mở rộng nằm trong [scripts/README.md](scripts/README.md). Các vấn đề đã biết nằm trong
+This file is the **user guide**. Technical details of each stage, the cleanup rules and how
+to extend them are in [scripts/README.md](scripts/README.md). Known issues are tracked in
 [scripts/BACKLOG.md](scripts/BACKLOG.md).
 
-## Yêu cầu hệ thống
+## System requirements
 
-### Máy chạy pipeline (bắt buộc)
+### Processing machine (required)
 
-| Thành phần | Phiên bản | Ghi chú |
+| Component | Version | Notes |
 |---|---|---|
-| **Windows** | 10 hoặc 11 | Bước convert điều khiển Word qua COM và dùng clipboard của Windows, nên không chạy được trên macOS/Linux |
-| **Microsoft Word desktop** (Office) | 2013 trở lên, 32 hoặc 64 bit | Phải là bản cài trên máy (Microsoft 365 Apps, Office 2016/2019/2021/2024…) **đã kích hoạt bản quyền**. Word for the web và Word trên Mac không dùng được. Word chưa kích hoạt chỉ mở ở chế độ xem nên không lưu được file |
-| **Windows PowerShell** | 5.1 | Có sẵn trên Windows 10/11. File `.bat` gọi `powershell.exe` (5.1), không phải PowerShell 7 (`pwsh`) |
-| **pandoc** | ≥ 3.0, khuyến nghị ≥ 3.11 | `winget install --id JohnMacFarlane.Pandoc`. Với bản cũ hơn 3.11, tham chiếu chéo ra chữ thường thay vì link |
-| **uv** | bản mới | `winget install --id astral-sh.uv -e`. **Không cần cài Python**: lần chạy đầu, uv tự tải Python 3.12 và thư viện đúng phiên bản (cần internet lần đầu; nếu có proxy thì đặt `HTTPS_PROXY`) |
+| **Windows** | 10 or 11 | The convert stage drives Word through COM and uses the Windows clipboard, so it cannot run on macOS/Linux |
+| **Microsoft Word desktop** (Office) | 2013 or newer, 32 or 64 bit | Must be installed on the machine (Microsoft 365 Apps, Office 2016/2019/2021/2024…) and **activated**. Word for the web and Word for Mac do not work. Unactivated Word opens documents read-only and cannot save |
+| **Windows PowerShell** | 5.1 | Built into Windows 10/11. The `.bat` files call `powershell.exe` (5.1), not PowerShell 7 (`pwsh`) |
+| **pandoc** | ≥ 3.0, 3.11+ recommended | `winget install --id JohnMacFarlane.Pandoc`. Before 3.11, cross references come out as plain text instead of links |
+| **uv** | recent | `winget install --id astral-sh.uv -e`. **No Python install needed**: on the first run uv downloads Python 3.12 and the pinned libraries (needs internet the first time; behind a proxy, set `HTTPS_PROXY`) |
 
-Sau khi cài pandoc và uv, **mở lại cửa sổ terminal** để PATH được cập nhật. Kiểm tra:
+After installing pandoc and uv, **open a new terminal** so that PATH is updated. Check:
 
 ```bat
 pandoc --version
 uv --version
 ```
 
-Điều kiện khác trên máy chạy:
+Other conditions on the processing machine:
 
-- PowerShell phải ở chế độ **FullLanguage**. Máy bị khóa bằng AppLocker/WDAC (Constrained
-  Language Mode) không chạy được bước convert; script sẽ báo lỗi ngay từ đầu.
-- Word không bị chặn bởi hộp thoại lần đầu (đăng nhập, chọn định dạng file, kích hoạt).
-  Nên mở Word bằng tay một lần và đóng hết các hộp thoại trước khi chạy.
-- **Không dùng clipboard** (copy/paste) trong lúc bước convert đang chạy, và tắt các ứng dụng
-  quản lý clipboard. Script lấy hình của shape floating qua clipboard, nên nội dung clipboard
-  hiện có sẽ bị xóa.
+- PowerShell must run in **FullLanguage** mode. Machines locked down with AppLocker/WDAC
+  (Constrained Language Mode) cannot run the convert stage; the script reports this at the start.
+- Word must not be blocked by first-run dialogs (sign-in, default file format, activation).
+  Open Word by hand once and close every dialog before running.
+- **Do not use the clipboard** (copy/paste) while the convert stage runs, and turn off
+  clipboard manager apps. The script captures floating shapes through the clipboard, so its
+  current content is cleared.
 
-### Bước nào cần gì
+### Which stage needs what
 
-| Bước | Windows + Word | pandoc | uv |
+| Stage | Windows + Word | pandoc | uv |
 |---|:---:|:---:|:---:|
-| [1] preflight, [8] gate (`Test-DocxDrawings.ps1`) | Windows (PowerShell), không cần Word | | |
-| [2] cleanup, [4] prep (Python) | | | ✔ (chạy được cả trên macOS/Linux) |
+| [1] preflight, [8] gate (`Test-DocxDrawings.ps1`) | Windows (PowerShell), no Word | | |
+| [2] cleanup, [4] prep (Python) | | | ✔ (also runs on macOS/Linux) |
 | [3] convert (`Convert-ShapesToPictures.ps1`) | ✔ | | |
 | [5] pandoc | | ✔ | |
-| [6] media (`Convert-MediaToPng.ps1`) | Windows (GDI+), không cần Word | | |
+| [6] media (`Convert-MediaToPng.ps1`) | Windows (GDI+), no Word | | |
 | [7] publish (`Publish-Output.ps1`) | Windows (PowerShell) | | |
 
-Trên macOS/Linux chỉ phát triển và chạy test được phần Python (`cd scripts/cleanup && uv run pytest`).
+On macOS/Linux, only the Python part can be developed and tested (`cd scripts/cleanup && uv run pytest`).
 
-## Cách dùng
+## Usage
 
-### 1. Chạy
+### 1. Run
 
-Kéo thả file `.docx` vào một trong các file `.bat` trong `scripts\`, hoặc chạy từ `cmd`:
+Drag and drop a `.docx` file onto one of the `.bat` files in `scripts\`, or run from `cmd`:
 
 ```bat
 cd scripts
 
-rem Tài liệu có khung đỏ của người review và bảng 1 ô bọc hình: profile review-markup
+rem Documents with reviewer red boxes and one-cell layout tables: profile review-markup
 run-review-markup.bat D:\data\input.docx
 
-rem Tài liệu thường: không làm sạch
+rem Regular documents: no cleanup
 run-all.bat D:\data\input.docx
 ```
 
-Với một bộ dữ liệu mới, nên chạy thử ở chế độ **chỉ báo cáo** trước, kiểm tra
-`input.cleanup-manifest.csv`, rồi mới chạy thật:
+For a new data set, first run in **report-only** mode, check `input.cleanup-manifest.csv`,
+then do the real run:
 
 ```bat
 run-all.bat D:\data\input.docx -Profile review-markup -CleanupMode Report
 ```
 
-Một tài liệu dài có thể mất vài phút ở bước convert. Cửa sổ Word chạy ẩn; không cần mở
-hay thao tác gì với nó.
+A long document can take a few minutes in the convert stage. Word runs hidden; there is no
+need to open or touch it.
 
-### 2. Lấy kết quả
+### 2. Get the result
 
-Kết quả nằm cạnh file input:
+The result is next to the input file:
 
 ```
 D:\data\
-  input.docx          file gốc, không bao giờ bị sửa
-  input.out\          KẾT QUẢ BÀN GIAO (tạo lại sau mỗi lần chạy)
+  input.docx          original file, never modified
+  input.out\          DELIVERABLE (rebuilt on every run)
     input.md
-    images\           chỉ các ảnh PNG mà input.md dùng
-  input.work\         file trung gian, log, manifest để kiểm tra
+    images\           only the PNG images that input.md uses
+  input.work\         intermediate files, log and manifests for inspection
 ```
 
-Chỉ cần dùng thư mục `input.out\`. Đừng lưu file của mình vào đó: thư mục bị xóa và tạo lại
-mỗi lần chạy.
+Only `input.out\` is needed. Do not save your own files there: the folder is deleted and
+rebuilt on every run.
 
-### 3. Đọc kết quả chạy
+### 3. Read the run result
 
-Dòng cuối trên console cho biết kết quả:
+The last console line tells the result:
 
-| Mã thoát | Dòng cuối | Ý nghĩa |
+| Exit code | Last line | Meaning |
 |---|---|---|
-| `0` | `[PASS] ...` | Mọi hình vẽ đã được chuyển thành ảnh |
-| `3` | `[CHECK] Finished with issues ...` | Đã có kết quả, nhưng cần kiểm tra: có hình convert lỗi (`FAILED`), link ảnh hỏng, hoặc còn EMF/WMF |
-| `1` | `[ERROR] ...` | Lỗi, không có kết quả mới. Đọc thông báo lỗi |
+| `0` | `[PASS] ...` | Every drawing was converted to an image |
+| `3` | `[CHECK] Finished with issues ...` | Output was produced, but needs checking: a drawing failed to convert (`FAILED`), a broken image link, or EMF/WMF left |
+| `1` | `[ERROR] ...` | Error, no new output. Read the error message |
 
-Khi gặp mã `3`, xem các file trong `input.work\`:
+With exit code `3`, look at the files in `input.work\`:
 
-| File | Xem gì |
+| File | What to look for |
 |---|---|
-| `input.pipeline.log` | Toàn bộ log của lần chạy |
-| `input.shapes\manifest.csv` | Từng hình vẽ: đã convert hay chưa, lỗi gì (cột `Action`, `Error`) |
-| `input.cleanup-manifest.csv` | Các khung đỏ đã xóa, các bảng bọc đã gỡ, và các trường hợp chỉ báo cáo |
+| `input.pipeline.log` | The full log of the run |
+| `input.shapes\manifest.csv` | Every drawing: converted or not, and the error (`Action`, `Error` columns) |
+| `input.cleanup-manifest.csv` | Red boxes removed, layout tables unwrapped, and cases only reported |
 
-### Tham số thường dùng
+### Common options
 
-Thêm sau tên file, ví dụ `run-all.bat input.docx -Dpi 300 -NoPageInfo`:
+Add them after the file name, e.g. `run-all.bat input.docx -Dpi 300 -NoPageInfo`:
 
-| Tham số | Tác dụng |
+| Option | Effect |
 |---|---|
-| `-Profile review-markup` | Bật làm sạch khung đỏ và bảng bọc (`run-review-markup.bat` đã có sẵn) |
-| `-CleanupMode Report` | Làm sạch chỉ báo cáo, không sửa gì |
-| `-Dpi 300` | Ảnh nét hơn (mặc định 200) |
-| `-NoPageInfo` | Chạy nhanh hơn với tài liệu dài (bỏ số trang trong manifest) |
-| `-IncludeTextBoxes` | Chuyển cả text box đứng riêng thành ảnh (mặc định giữ dạng chữ) |
-| `-UnlinkShapeFields` | Dùng khi ảnh hiện `Error! Reference source not found.` |
-| `-NoHeadingNumbers` | Không ghi số mục ("7.5") vào tiêu đề |
-| `-OutputDir <thư mục>` | Đổi nơi ghi kết quả (mặc định `input.out` cạnh file input) |
-| `-OutputFormat markdown` | Xuất Pandoc Markdown thay vì GFM |
+| `-Profile review-markup` | Remove reviewer red boxes and unwrap layout tables (`run-review-markup.bat` does this) |
+| `-CleanupMode Report` | Cleanup only reports, changes nothing |
+| `-Dpi 300` | Sharper images (default 200) |
+| `-NoPageInfo` | Faster on long documents (no page numbers in the manifest) |
+| `-IncludeTextBoxes` | Also turn stand-alone text boxes into images (kept as text by default) |
+| `-UnlinkShapeFields` | Use when images show `Error! Reference source not found.` |
+| `-NoHeadingNumbers` | Do not write heading numbers ("7.5") into the heading text |
+| `-OutputDir <folder>` | Where to write the result (default `input.out` next to the input) |
+| `-OutputFormat markdown` | Pandoc Markdown instead of GFM |
 
-Danh sách đầy đủ: chạy `run-all.bat` không có tham số, hoặc xem
-[scripts/README.md](scripts/README.md).
+Full list: run `run-all.bat` without arguments, or see [scripts/README.md](scripts/README.md).
 
-Chạy không dừng (ví dụ trong script khác hoặc CI): `set NOPAUSE=1` trước khi gọi file `.bat`.
+Unattended runs (from another script or CI): `set NOPAUSE=1` before calling the `.bat` file.
 
-## Xử lý sự cố nhanh
+## Quick troubleshooting
 
-| Triệu chứng | Cách xử lý |
+| Symptom | Fix |
 |---|---|
-| `pandoc not found` / `uv not found` | Cài theo bảng yêu cầu ở trên, rồi mở lại cửa sổ terminal |
-| `running scripts is disabled` | Chạy qua file `.bat` (đã có `-ExecutionPolicy Bypass`) |
-| `needs FullLanguage` | Máy bị khóa AppLocker/WDAC. Nhờ IT cho phép, hoặc chạy trên máy khác |
-| `Document is protected` | Gỡ Restrict Editing trong Word rồi chạy lại |
-| Treo, hoặc lỗi COM | Đóng hết Word (`taskkill /IM WINWORD.EXE /F`), chạy lại với `-Visible` để xem Word đang hiện hộp thoại gì |
-| Nhiều dòng `FAILED` liên quan clipboard | Không copy/paste trong lúc chạy; tắt ứng dụng quản lý clipboard |
-| File tải từ mạng không mở được | Chuột phải → Properties → Unblock, hoặc `Unblock-File .\input.docx` |
+| `pandoc not found` / `uv not found` | Install as listed above, then open a new terminal |
+| `running scripts is disabled` | Run through the `.bat` files (they pass `-ExecutionPolicy Bypass`) |
+| `needs FullLanguage` | The machine is locked down by AppLocker/WDAC. Ask IT to allow it, or use another machine |
+| `Document is protected` | Remove Restrict Editing in Word and run again |
+| Hang, or COM error | Close all Word instances (`taskkill /IM WINWORD.EXE /F`), run again with `-Visible` to see which dialog Word shows |
+| Many `FAILED` lines about the clipboard | Do not copy/paste during the run; turn off clipboard manager apps |
+| A file downloaded from the internet does not open | Right-click → Properties → Unblock, or `Unblock-File .\input.docx` |
 
-Các trường hợp khác: xem mục "Xử lý sự cố" trong [scripts/README.md](scripts/README.md).
+Other cases: see "Troubleshooting" in [scripts/README.md](scripts/README.md).

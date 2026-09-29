@@ -1,76 +1,76 @@
 # Backlog
 
-Các vấn đề đã biết và điểm cải tiến **chưa xử lý**, sẽ thống nhất và làm sau.
-Mức ưu tiên: **P1** là ảnh hưởng trực tiếp tới nội dung đầu ra; **P2** là chất lượng hoặc
-khả năng sử dụng; **P3** là kỹ thuật hoặc vận hành.
+Known issues and improvements that are **not handled yet**, to be agreed on and done later.
+Priority: **P1** = directly affects the output content; **P2** = quality or usability;
+**P3** = technical or operational.
 
-## Vấn đề đã biết
+## Known issues
 
-| ID | Ưu tiên | Vấn đề | Dữ kiện đã có | Bước tiếp theo |
+| ID | Priority | Issue | Facts so far | Next step |
 |---|---|---|---|---|
-| – | – | (không còn vấn đề đã biết nào đang mở) | | |
+| – | – | (no open known issues) | | |
 
-## Quyết định còn mở
+## Open decisions
 
-| ID | Ưu tiên | Câu hỏi | Lựa chọn |
+| ID | Priority | Question | Options |
 |---|---|---|---|
-| D-02 | P2 | **Chữ trong hình** cho các bước sau (LLM…) | Hiện tại nằm trong thuộc tính `alt`. Các lựa chọn khác: một khối text ngay dưới ảnh; dùng LLM đọc ảnh để sinh mô tả; chuyển sơ đồ trạng thái (sơ đồ trạng thái) sang Mermaid |
+| D-02 | P2 | **Text inside figures** for downstream steps (LLM…) | Currently in the `alt` attribute. Alternatives: a text block right below the image; an LLM that reads the image and writes a description; converting state diagrams to Mermaid |
 
-## Cải tiến theo bước
+## Improvements by stage
 
 ### Cleanup
 
-| ID | Ưu tiên | Nội dung |
+| ID | Priority | Item |
 |---|---|---|
-| C-01 | P1 | **Hiệu chỉnh ReviewerBoxes trên dữ liệu thật** (màu, độ trong suốt, `includeInGroups`) dựa trên các dòng `low`/`medium` trong `cleanup-manifest.csv` |
-| C-02 | P2 | UnwrapLayoutTables: bảng bọc **nhiều cột** (hai hình đặt cạnh nhau) hiện không xử lý. Có thể tách thành các hình liên tiếp |
-| C-03 | P3 | UnwrapLayoutTables: bảng 1 ô **chỉ chứa chữ** (khung Note) hiện chỉ báo cáo. Có thể chuyển thành blockquote |
-| C-04 | P3 | ReviewerBoxes: chế độ `Mark`, tức đánh dấu phần nội dung được khoanh (`<mark>`) thay vì chỉ xóa khung. Chỉ làm nếu phần khoanh đỏ có ý nghĩa |
-| C-05 | P3 | Khung đỏ đã được **vẽ sẵn vào ảnh chụp màn hình** (raster): ngoài phạm vi. Có thể chỉ đánh dấu các ảnh có nhiều pixel đỏ để kiểm tra thủ công |
+| C-01 | P1 | **Tune ReviewerBoxes on real data** (colors, opacity, `includeInGroups`) based on the `low`/`medium` rows in `cleanup-manifest.csv` |
+| C-02 | P2 | UnwrapLayoutTables: **multi-column** layout tables (two figures side by side) are not handled. They could be split into consecutive figures |
+| C-03 | P3 | UnwrapLayoutTables: one-cell tables with **text only** (Note boxes) are only reported. They could become blockquotes |
+| C-04 | P3 | ReviewerBoxes: a `Mark` mode that highlights the boxed content (`<mark>`) instead of only removing the box. Only if the boxed parts carry meaning |
+| C-05 | P3 | Red boxes **already drawn into screenshots** (raster): out of scope. Images with many red pixels could be flagged for manual review |
 
 ### Convert (Word)
 
-| ID | Ưu tiên | Nội dung |
+| ID | Priority | Item |
 |---|---|---|
-| V-01 | P2 | Chưa xử lý shape trong header, footer, footnote, comment |
-| V-03 | P2 | Gom shape rời thành một hình dựa vào caption: hình không có caption và neo ở nhiều paragraph có thể bị tách. Caption nằm trong text box floating có thể bị render vào ảnh |
-| V-04 | P3 | Đang dùng lại dấu phân cách ` \| ` trong alt text (`Build-AltText`), và `figures.lua` dựa vào dấu này để chuyển thành `; `. Nếu chạy không có filter thì `\|` vẫn xuất hiện |
-| V-05 | P3 | Hiệu năng: mở và đóng Word một lần cho cả lô tài liệu, thay vì mỗi file một lần |
-| V-06 | P2 | Hiệu năng bước convert: đã có số đo từng phần. Việc tiếp theo là bỏ `Range.WordOpenXML` gọi cho từng inline shape (phân loại một lần từ XML), và thay `Start-Sleep 300ms` cố định sau mỗi lần copy bằng vòng chờ thích ứng |
-| V-07 | P3 | Song song hóa: nhiều tài liệu chạy cùng lúc (mỗi tiến trình Word riêng, cần khóa clipboard vì đây là tài nguyên chung của máy), và render PNG song song trong bước convert |
+| V-01 | P2 | Shapes in headers, footers, footnotes and comments are not handled |
+| V-03 | P2 | Loose shapes are grouped into one figure by caption: figures without a caption anchored in several paragraphs can be split. A caption in a floating text box can be rendered into the image |
+| V-04 | P3 | The ` \| ` separator is reused in the alt text (`Build-AltText`), and `figures.lua` relies on it to produce `; `. Without the filter, `\|` still appears |
+| V-05 | P3 | Performance: open and close Word once for a batch of documents instead of once per file |
+| V-06 | P2 | Convert stage performance: timings per part are in place. Next: drop the per-inline-shape `Range.WordOpenXML` call (classify once from the XML), and replace the fixed 300 ms `Start-Sleep` after each copy with an adaptive wait |
+| V-07 | P3 | Parallelism: several documents at once (one Word process each; the clipboard needs a lock since it is shared by the whole machine), and parallel PNG rendering in the convert stage |
 
-### Pandoc / đầu ra
+### pandoc / output
 
-| ID | Ưu tiên | Nội dung |
+| ID | Priority | Item |
 |---|---|---|
-| P-01 | P3 | Pandoc đổi tên ảnh thành `imageN.png`, nên chỉ còn thuộc tính `data-shape` nối ảnh với manifest. Có thể dùng filter để đặt tên file theo Id (`S001.png`) |
-| P-02 | P2 | **Giảm token**: GFM giữ lại các thuộc tính chỉ để trình bày (`style="width:…"`, `<colgroup>`, `style` của bảng). Có thể dùng filter để bỏ bớt |
-| P-03 | P2 | **Yêu cầu với RAG**: giữ thẻ HTML, không cắt chunk giữa `<table>` hoặc `<figure>`. Cần kiểm tra khi tích hợp |
-| P-04 | P3 | Bảng không có hàng tiêu đề trong Word bị xuất thành bảng HTML, dù rất đơn giản. Có thể coi hàng đầu tiên là tiêu đề khi hàng đó in đậm hoặc có tô nền |
-| P-06 | P3 | Với pandoc cũ hơn 3.11, tham chiếu `REF` ra chữ thường thay vì link. Nên thống nhất dùng pandoc ≥ 3.11 trên máy chạy |
-| P-05 | P3 | GitHub thêm tiền tố `user-content-` vào `id`, nên link tham chiếu chéo (`#_Ref…`) có thể không nhảy đúng khi xem trên GitHub. VS Code hiển thị bình thường |
+| P-01 | P3 | pandoc renames images to `imageN.png`, so only the `data-shape` attribute links an image to the manifest. A filter could name files by Id (`S001.png`) |
+| P-02 | P2 | **Fewer tokens**: GFM keeps presentation-only attributes (`style="width:…"`, `<colgroup>`, table `style`). A filter could drop them |
+| P-03 | P2 | **RAG requirement**: keep HTML tags, never split a chunk inside `<table>` or `<figure>`. Needs checking during integration |
+| P-04 | P3 | Tables without a header row in Word become HTML tables even when they are very simple. The first row could be treated as a header when it is bold or shaded |
+| P-06 | P3 | With pandoc older than 3.11, `REF` cross references become plain text instead of links. Standardize on pandoc ≥ 3.11 on the processing machine |
+| P-05 | P3 | GitHub prefixes `id`s with `user-content-`, so cross-reference links (`#_Ref…`) may not jump correctly on GitHub. VS Code works |
 
-### Kiểm tra & vận hành
+### Checks & operations
 
-| ID | Ưu tiên | Nội dung |
+| ID | Priority | Item |
 |---|---|---|
-| Q-01 | P2 | Phép đếm caption và ảnh ở bước gate chỉ là heuristic. Có thể mở rộng sang bảng và đếm trên AST của pandoc thay vì regex |
-| Q-02 | P3 | Chuyển `Test-DocxDrawings.ps1` sang package Python để dùng chung bộ phân loại XML với bước cleanup |
-| Q-03 | P3 | CI: `uv run pytest`, PSScriptAnalyzer cho các script `.ps1`, và một bài test tích hợp trên Windows với file mẫu đã ẩn thông tin |
-| Q-04 | P3 | Chạy theo lô nhiều file docx, kèm báo cáo tổng hợp |
+| Q-01 | P2 | The caption vs. image count in the gate is only a heuristic. It could cover tables too and count on the pandoc AST instead of with regexes |
+| Q-02 | P3 | Move `Test-DocxDrawings.ps1` into the Python package to share the XML classifier with the cleanup stage |
+| Q-03 | P3 | CI: `uv run pytest`, PSScriptAnalyzer for the `.ps1` scripts, and a Windows integration test with an anonymized sample file |
+| Q-04 | P3 | Batch runs over many docx files, with a summary report |
 
-## Đã xử lý
+## Done
 
-| Vấn đề | Cách xử lý |
+| Issue | Solution |
 |---|---|
-| Pandoc bỏ qua shape vẽ bằng Word mà không báo | `Convert-ShapesToPictures.ps1` |
-| Khung đỏ của người review làm hình bị tách, sinh ảnh khung đỏ | Quy tắc cleanup `ReviewerBoxes` |
-| Hình và bảng bị đóng trong bảng 1 ô (grid table) | Quy tắc cleanup `UnwrapLayoutTables` |
-| Alt text và title làm vỡ cú pháp ảnh (`\|`, ngắt dòng, `shape2png`) | `pandoc\figures.lua` + `--wrap=none` |
-| Mất số mục do Word đánh tự động (`7.5 System settings` → `System settings`), làm hỏng mọi tham chiếu "refer to 7.5". Pandoc không đọc `numbering.xml` cho heading, và `--number-sections` không dùng được với GFM | Bước convert ghi `ListFormat.ListString` vào tiêu đề, sau khi đã khóa toàn bộ field |
-| Ảnh EMF/WMF lọt ra markdown và không hiển thị được, ví dụ ảnh floating (trước là V-02) | Bước media `Convert-MediaToPng.ps1`: render sang PNG và sửa link |
-| Ảnh render ra `Error! Reference source not found.` thay cho tham chiếu chéo trong hình (ví dụ "refer to 7.5"). Nguyên nhân: Word cập nhật field khi chuyển/render shape, lúc đó không thấy bookmark | Bước convert khóa field trong shape (`wdTextFrameStory`) trước khi chuyển đổi, và tắt `UpdateFieldsAtPrint`. Dự phòng: `-UnlinkShapeFields` |
-| Mất số caption và nhãn "Table", mất tham chiếu chéo (trước là B-01). Nguyên nhân: các field `w:fldSimple` (STYLEREF, SEQ) có sẵn trong tài liệu gốc; pandoc bỏ chữ của `fldSimple` | Bước prep, quy tắc `ExpandSimpleFields` (`profiles\pandoc.json`): chuyển về dạng field đầy đủ |
-| Caption bảng bị đưa xuống dưới bảng (bảng pipe của GFM không có caption) | `figures.lua`: caption thành đoạn văn phía trên bảng |
-| Markdown đúng nhưng không hiển thị được (grid table, `{…}`, `: caption`). Trước là D-01 | Xuất `gfm`: bảng đơn giản thành bảng pipe, bảng phức tạp và hình thành HTML. Bookmark của caption bảng (trước là B-02) thành `id` HTML hợp lệ |
-| Đường dẫn sai trong `.bat` sau lệnh `shift` | Lưu thư mục script trước khi `shift` |
+| pandoc silently drops drawings made in Word | `Convert-ShapesToPictures.ps1` |
+| Reviewer red boxes split figures and produce images of red boxes | Cleanup rule `ReviewerBoxes` |
+| Figures and tables boxed in a one-cell table (grid table) | Cleanup rule `UnwrapLayoutTables` |
+| Alt text and title break the image syntax (`\|`, line breaks, `shape2png`) | `pandoc\figures.lua` + `--wrap=none` |
+| Word automatic heading numbers lost (`7.5 System settings` → `System settings`), breaking every "refer to 7.5". pandoc does not read `numbering.xml` for headings, and `--number-sections` does not work with GFM | The convert stage writes `ListFormat.ListString` into the heading, after locking all fields |
+| EMF/WMF images reached the markdown and could not be displayed, e.g. floating pictures (was V-02) | Media stage `Convert-MediaToPng.ps1`: render to PNG and fix the links |
+| Images rendered `Error! Reference source not found.` instead of the cross reference inside the drawing (e.g. "refer to 7.5"). Cause: Word updates fields while converting/rendering a shape, when the bookmark is out of reach | The convert stage locks the fields before converting and turns off `UpdateFieldsAtPrint`. Fallback: `-UnlinkShapeFields` |
+| Caption numbers, the "Table" label and cross references lost (was B-01). Cause: `w:fldSimple` fields (STYLEREF, SEQ) already in the original document; pandoc drops the text of `fldSimple` | Prep stage, rule `ExpandSimpleFields` (`profiles\pandoc.json`): rewrite as complex fields |
+| Table captions moved below the table (GFM pipe tables have no caption) | `figures.lua`: caption becomes a paragraph above the table |
+| Correct markdown that does not render (grid tables, `{…}`, `: caption`). Was D-01 | Output `gfm`: simple tables become pipe tables, complex tables and figures become HTML. Table caption bookmarks (was B-02) become valid HTML `id`s |
+| Wrong path in `.bat` files after `shift` | Save the script folder before `shift` |
